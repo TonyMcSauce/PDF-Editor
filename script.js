@@ -312,6 +312,70 @@ $('sigPickBtn' ).addEventListener('click', () => setPlaceMode('signature', 'sigP
    for a malformed page entry, pdf-lib throws "expected instance
    of e". Guard: wrap in try/catch with full stack logging.
 ─────────────────────────────────────────────────── */
+
+async function rasterizeAndAddPage(destDoc, pdfJsDoc, pageIdx, extraRot = 0, label = 'raster') {
+  if (!pdfJsDoc) throw new Error(`${label}: raster fallback unavailable`);
+  const jsPage = await pdfJsDoc.getPage(pageIdx + 1);
+  const rotation = (jsPage.rotate + extraRot + 360) % 360;
+  const viewport = jsPage.getViewport({ scale: 2, rotation });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  await jsPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+  const png = dataUrlToBytes(canvas.toDataURL('image/png'));
+  const img = await destDoc.embedPng(png);
+  const page = destDoc.addPage([viewport.width, viewport.height]);
+  page.drawImage(img, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+}
+
+async function addPagesRobust({
+  destDoc,
+  srcPdfLibDoc,
+  idxs,
+  label,
+  fallbackPdfJsDoc = null,
+  getExtraRotation = null,
+}) {
+  const total = srcPdfLibDoc
+    ? srcPdfLibDoc.getPageCount()
+    : (fallbackPdfJsDoc ? fallbackPdfJsDoc.numPages : 0);
+  const valid = idxs.filter(i => Number.isInteger(i) && i >= 0 && i < total);
+  if (valid.length !== idxs.length) {
+    console.warn(`[${label}] dropped invalid page indices:`, idxs);
+  }
+  if (!valid.length) throw new Error(`${label}: no valid pages to copy`);
+
+  let added = 0;
+  for (const idx of valid) {
+    const extraRot = getExtraRotation ? (getExtraRotation(idx) || 0) : 0;
+    try {
+      if (!srcPdfLibDoc) throw new Error('pdf-lib source unavailable');
+      const copied = await destDoc.copyPages(srcPdfLibDoc, [idx]);
+      const page = copied[0];
+      if (!page) throw new Error('copyPages returned empty page');
+      if (extraRot) {
+        const cur = page.getRotation().angle;
+        page.setRotation(PDFLib.degrees((cur + extraRot + 360) % 360));
+      }
+      destDoc.addPage(page);
+      added++;
+    } catch (err) {
+      console.warn(`[${label}] page ${idx + 1} copy failed, trying raster fallback:`, err);
+      try {
+        await rasterizeAndAddPage(destDoc, fallbackPdfJsDoc, idx, extraRot, label);
+        added++;
+      } catch (rasterErr) {
+        console.warn(`[${label}] page ${idx + 1} raster fallback failed:`, rasterErr);
+      }
+    }
+  }
+
+  if (!added) throw new Error(`${label}: no pages could be processed`);
+  return added;
+}
+
 async function rebuild() {
   if (!S.rawBytes) throw new Error('No PDF loaded');
 
@@ -325,21 +389,13 @@ async function rebuild() {
   console.log('[rebuild] src page count:', src.getPageCount());
   const dest = await PDFLib.PDFDocument.create();
 
-  // Validate page order indices before passing to copyPages
-  const totalSrcPages = src.getPageCount();
-  const safeOrder = S.pageOrder.filter(i => i >= 0 && i < totalSrcPages);
-  if (safeOrder.length === 0) throw new Error('No valid pages to copy');
-
-  const copied = await dest.copyPages(src, safeOrder);
-  copied.forEach((page, i) => {
-    const origIdx = safeOrder[i];
-    const extra   = S.pageRots[origIdx] || 0;
-    if (extra !== 0) {
-      // getRotation() confirmed to return {type,angle} — safe
-      const curAngle = page.getRotation().angle;
-      page.setRotation(PDFLib.degrees((curAngle + extra) % 360));
-    }
-    dest.addPage(page);
+  await addPagesRobust({
+    destDoc: dest,
+    srcPdfLibDoc: src,
+    idxs: S.pageOrder,
+    label: 'rebuild',
+    fallbackPdfJsDoc: S.pdfJsDoc,
+    getExtraRotation: idx => S.pageRots[idx] || 0,
   });
 
   const saved = await dest.save();
@@ -465,12 +521,25 @@ $('mergeBtn').addEventListener('click', async () => {
   loading(true, `Merging ${S.mergeFiles.length} PDFs…`);
   try {
     const merged = await PDFLib.PDFDocument.create();
-    for (const f of S.mergeFiles) {
-      const buf  = new Uint8Array(await f.arrayBuffer());
-      const doc  = await PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
-      const idxs = Array.from({ length: doc.getPageCount() }, (_, i) => i);
-      const pgs  = await merged.copyPages(doc, idxs);
-      pgs.forEach(p => merged.addPage(p));
+    for (let i = 0; i < S.mergeFiles.length; i++) {
+      const f = S.mergeFiles[i];
+      const buf = new Uint8Array(await f.arrayBuffer());
+      const fallbackJsDoc = S.mergeJsDocs[i] || null;
+      let doc = null;
+      try {
+        doc = await PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
+      } catch (e) {
+        console.warn(`merge:${f.name} pdf-lib load failed, using raster fallback`, e);
+      }
+      const pageCount = doc ? doc.getPageCount() : (fallbackJsDoc ? fallbackJsDoc.numPages : 0);
+      const idxs = Array.from({ length: pageCount }, (_, p) => p);
+      await addPagesRobust({
+        destDoc: merged,
+        srcPdfLibDoc: doc,
+        idxs,
+        label: `merge:${f.name}`,
+        fallbackPdfJsDoc: fallbackJsDoc,
+      });
     }
     const out = await merged.save();
     dlBytes(out instanceof Uint8Array ? out : new Uint8Array(out), 'merged.pdf');
@@ -505,8 +574,13 @@ $('splitBtn').addEventListener('click', async () => {
     const src  = await PDFLib.PDFDocument.load(srcBytes, { ignoreEncryption: true });
     const dest = await PDFLib.PDFDocument.create();
     const idxs = Array.from({ length: to - from + 1 }, (_, i) => from - 1 + i);
-    const pgs  = await dest.copyPages(src, idxs);
-    pgs.forEach(p => dest.addPage(p));
+    await addPagesRobust({
+      destDoc: dest,
+      srcPdfLibDoc: src,
+      idxs,
+      label: 'split',
+      fallbackPdfJsDoc: S.pdfJsDoc,
+    });
     const out  = await dest.save();
     dlBytes(out instanceof Uint8Array ? out : new Uint8Array(out), `pages_${from}-${to}.pdf`);
     toast(`Pages ${from}–${to} extracted!`, 'success');
