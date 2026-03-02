@@ -113,19 +113,47 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
  * isNew=false → keep page/zoom state (after edit)
  */
 async function ingestBytes(bytes, isNew) {
-  // bytes MUST be Uint8Array — PDF.js and pdf-lib both need it
   if (!(bytes instanceof Uint8Array)) {
     bytes = new Uint8Array(bytes);
   }
-  S.rawBytes   = bytes;
-  // PDF.js needs its own copy — slice() gives a new ArrayBuffer
-  S.pdfJsDoc   = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+
+  // STEP 1: Load with pdf-lib
+  let doc;
+  try {
+    doc = await PDFLib.PDFDocument.load(bytes, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+  } catch (e) {
+    console.error("Initial load failed:", e);
+    throw new Error("Unsupported or corrupted PDF.");
+  }
+
+  // STEP 2: Re-save to normalize structure
+  const normalized = await doc.save({
+    useObjectStreams: false,   // critical
+    addDefaultPage: false,
+  });
+
+  const cleanBytes = normalized instanceof Uint8Array
+    ? normalized
+    : new Uint8Array(normalized);
+
+  // STEP 3: Now store clean version
+  S.rawBytes = cleanBytes;
+
+  // STEP 4: Load into PDF.js using sanitized bytes
+  S.pdfJsDoc = await pdfjsLib.getDocument({
+    data: cleanBytes.slice()
+  }).promise;
+
   S.totalPages = S.pdfJsDoc.numPages;
+
   if (isNew) {
-    S.pageOrder  = Array.from({ length: S.totalPages }, (_, i) => i);
-    S.pageRots   = {};
+    S.pageOrder = Array.from({ length: S.totalPages }, (_, i) => i);
+    S.pageRots = {};
     S.selectedPgs.clear();
-    S.curPage    = 1;
+    S.curPage = 1;
   }
 }
 
@@ -327,7 +355,11 @@ async function rebuild() {
 
   // Validate page order indices before passing to copyPages
   const totalSrcPages = src.getPageCount();
-  const safeOrder = S.pageOrder.filter(i => i >= 0 && i < totalSrcPages);
+  const safeOrder = S.pageOrder.filter(i =>
+  Number.isInteger(i) &&
+  i >= 0 &&
+  i < totalSrcPages
+);
   if (safeOrder.length === 0) throw new Error('No valid pages to copy');
 
   const copied = await dest.copyPages(src, safeOrder);
@@ -655,7 +687,9 @@ $('addTextBtn').addEventListener('click', async () => {
       font,
       color: PDFLib.rgb(col.r / 255, col.g / 255, col.b / 255),
     });
-    const saved = await doc.save();
+    const saved = await dest.save({
+      useObjectStreams: false
+    });
     await applyEdit(saved instanceof Uint8Array ? saved : new Uint8Array(saved));
     setPlaceMode(null);
     toast('Text added!', 'success');
