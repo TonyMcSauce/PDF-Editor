@@ -117,32 +117,31 @@ async function ingestBytes(bytes, isNew) {
     bytes = new Uint8Array(bytes);
   }
 
-  // STEP 1: Load with pdf-lib
   let doc;
+
   try {
     doc = await PDFLib.PDFDocument.load(bytes, {
-      ignoreEncryption: true,
-      updateMetadata: false,
+      ignoreEncryption: true
     });
   } catch (e) {
-    console.error("Initial load failed:", e);
-    throw new Error("Unsupported or corrupted PDF.");
+    if (e.message.includes('password')) {
+      const pwd = prompt('This PDF is password protected. Enter password:');
+      if (!pwd) throw new Error('Password required.');
+      doc = await PDFLib.PDFDocument.load(bytes, {
+        password: pwd
+      });
+    } else {
+      throw e;
+    }
   }
 
-  // STEP 2: Re-save to normalize structure
-  const normalized = await doc.save({
-    useObjectStreams: false,   // critical
-    addDefaultPage: false,
-  });
-
+  const normalized = await doc.save({ useObjectStreams: false });
   const cleanBytes = normalized instanceof Uint8Array
     ? normalized
     : new Uint8Array(normalized);
 
-  // STEP 3: Now store clean version
   S.rawBytes = cleanBytes;
 
-  // STEP 4: Load into PDF.js using sanitized bytes
   S.pdfJsDoc = await pdfjsLib.getDocument({
     data: cleanBytes.slice()
   }).promise;
