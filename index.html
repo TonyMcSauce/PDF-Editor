@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PDF Studio</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>PDF Studio — All-in-One PDF Editor</title>
+  <link rel="stylesheet" href="style.css"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
@@ -14,38 +14,103 @@
 
 <header class="app-header">
   <div class="header-left">
-    <div class="logo"><i class="fa-solid fa-file-pdf"></i><span>PDF Studio</span></div>
+    <button class="logo-btn" id="goHome"><i class="fa-solid fa-file-pdf"></i><span>PDF Studio</span></button>
     <span class="tagline">100% Client-Side · No Upload · No Tracking</span>
   </div>
-  <button id="themeToggle" class="icon-btn" title="Toggle theme"><i class="fa-solid fa-moon"></i></button>
+  <button id="themeToggle" class="icon-btn"><i class="fa-solid fa-moon"></i></button>
 </header>
 
 <div id="loadingOverlay" class="loading-overlay hidden">
-  <div class="loading-box">
-    <div class="spinner"></div>
-    <p id="loadingText">Processing…</p>
-  </div>
+  <div class="loading-box"><div class="spinner"></div><p id="loadingText">Processing…</p></div>
 </div>
-
 <div id="toast" class="toast hidden"></div>
 
+<!-- HOME SCREEN -->
+<div id="homeScreen" class="home-screen">
+  <div class="home-hero">
+    <h1>Every PDF tool you need</h1>
+    <p>100% free · Works in your browser · No files leave your device</p>
+  </div>
+  <div class="tools-grid">
+    <div class="tool-card" data-tool="merge">
+      <div class="tool-card-icon" style="--c:#4f8ef7"><i class="fa-solid fa-layer-group"></i></div>
+      <h3>Merge PDF</h3><p>Combine multiple PDFs into one</p>
+    </div>
+    <div class="tool-card" data-tool="split">
+      <div class="tool-card-icon" style="--c:#a78bfa"><i class="fa-solid fa-scissors"></i></div>
+      <h3>Split PDF</h3><p>Extract pages into a new file</p>
+    </div>
+    <div class="tool-card" data-tool="compress">
+      <div class="tool-card-icon" style="--c:#34d399"><i class="fa-solid fa-compress-arrows-alt"></i></div>
+      <h3>Compress PDF</h3><p>Reduce file size while keeping quality</p>
+    </div>
+    <div class="tool-card" data-tool="imagestopdf">
+      <div class="tool-card-icon" style="--c:#fb923c"><i class="fa-solid fa-images"></i></div>
+      <h3>Images to PDF</h3><p>Convert JPG/PNG into a PDF</p>
+    </div>
+    <div class="tool-card" data-tool="pages">
+      <div class="tool-card-icon" style="--c:#4f8ef7"><i class="fa-solid fa-th-large"></i></div>
+      <h3>Organize Pages</h3><p>Reorder, rotate and delete pages</p>
+    </div>
+    <div class="tool-card" data-tool="annotate">
+      <div class="tool-card-icon" style="--c:#f472b6"><i class="fa-solid fa-pen-nib"></i></div>
+      <h3>Annotate PDF</h3><p>Draw, highlight, shapes and arrows</p>
+    </div>
+    <div class="tool-card" data-tool="text">
+      <div class="tool-card-icon" style="--c:#38bdf8"><i class="fa-solid fa-font"></i></div>
+      <h3>Add Text</h3><p>Overlay custom text onto pages</p>
+    </div>
+    <div class="tool-card" data-tool="image">
+      <div class="tool-card-icon" style="--c:#fb923c"><i class="fa-solid fa-image"></i></div>
+      <h3>Add Image</h3><p>Embed images onto PDF pages</p>
+    </div>
+    <div class="tool-card" data-tool="watermark">
+      <div class="tool-card-icon" style="--c:#a78bfa"><i class="fa-solid fa-stamp"></i></div>
+      <h3>Watermark</h3><p>Add text or image watermark</p>
+    </div>
+    <div class="tool-card" data-tool="pagenumbers">
+      <div class="tool-card-icon" style="--c:#34d399"><i class="fa-solid fa-list-ol"></i></div>
+      <h3>Page Numbers</h3><p>Stamp numbers on every page</p>
+    </div>
+    <div class="tool-card" data-tool="redact">
+      <div class="tool-card-icon" style="--c:#f74f6a"><i class="fa-solid fa-eraser"></i></div>
+      <h3>Redact PDF</h3><p>Black out sensitive content</p>
+    </div>
+    <div class="tool-card" data-tool="signature">
+      <div class="tool-card-icon" style="--c:#38bdf8"><i class="fa-solid fa-signature"></i></div>
+      <h3>Sign PDF</h3><p>Draw and embed your signature</p>
+    </div>
+    <div class="tool-card" data-tool="security">
+      <div class="tool-card-icon" style="--c:#f74f6a"><i class="fa-solid fa-lock"></i></div>
+      <h3>Protect PDF</h3><p>Password-protect your document</p>
+    </div>
+  </div>
+  <p class="home-note"><i class="fa-solid fa-shield-halved"></i> Your files never leave your browser. All processing is local.</p>
+</div>
+
+<!-- EDITOR SCREEN -->
+<div id="editorScreen" class="editor-screen hidden">
 <main class="app-layout">
 
   <aside class="sidebar">
     <nav class="tool-nav">
-      <button class="tool-btn active" data-panel="upload"><i class="fa-solid fa-upload"></i><span>Upload</span></button>
+      <button class="tool-btn" data-panel="upload"><i class="fa-solid fa-upload"></i><span>Upload</span></button>
       <button class="tool-btn" data-panel="merge"><i class="fa-solid fa-layer-group"></i><span>Merge</span></button>
       <button class="tool-btn" data-panel="split"><i class="fa-solid fa-scissors"></i><span>Split</span></button>
+      <button class="tool-btn" data-panel="compress"><i class="fa-solid fa-compress-arrows-alt"></i><span>Compress</span></button>
+      <button class="tool-btn" data-panel="imagestopdf"><i class="fa-solid fa-images"></i><span>Img→PDF</span></button>
       <button class="tool-btn" data-panel="pages"><i class="fa-solid fa-th-large"></i><span>Pages</span></button>
-      <button class="tool-btn" data-panel="text"><i class="fa-solid fa-font"></i><span>Add Text</span></button>
-      <button class="tool-btn" data-panel="image"><i class="fa-solid fa-image"></i><span>Add Image</span></button>
-      <button class="tool-btn" data-panel="signature"><i class="fa-solid fa-signature"></i><span>Signature</span></button>
-      <button class="tool-btn" data-panel="security"><i class="fa-solid fa-lock"></i><span>Security</span></button>
+      <button class="tool-btn" data-panel="annotate"><i class="fa-solid fa-pen-nib"></i><span>Annotate</span></button>
+      <button class="tool-btn" data-panel="text"><i class="fa-solid fa-font"></i><span>Text</span></button>
+      <button class="tool-btn" data-panel="image"><i class="fa-solid fa-image"></i><span>Image</span></button>
+      <button class="tool-btn" data-panel="watermark"><i class="fa-solid fa-stamp"></i><span>Watermark</span></button>
+      <button class="tool-btn" data-panel="pagenumbers"><i class="fa-solid fa-list-ol"></i><span>Numbers</span></button>
+      <button class="tool-btn" data-panel="redact"><i class="fa-solid fa-eraser"></i><span>Redact</span></button>
+      <button class="tool-btn" data-panel="signature"><i class="fa-solid fa-signature"></i><span>Sign</span></button>
+      <button class="tool-btn" data-panel="security"><i class="fa-solid fa-lock"></i><span>Protect</span></button>
     </nav>
     <div class="sidebar-bottom">
-      <button id="downloadBtn" class="download-btn" disabled>
-        <i class="fa-solid fa-download"></i><span>Download PDF</span>
-      </button>
+      <button id="downloadBtn" class="download-btn" disabled><i class="fa-solid fa-download"></i><span>Download</span></button>
     </div>
   </aside>
 
@@ -56,9 +121,8 @@
       <h2 class="panel-title"><i class="fa-solid fa-upload"></i> Upload PDF</h2>
       <div id="dropZone" class="drop-zone">
         <i class="fa-solid fa-file-arrow-up drop-icon"></i>
-        <p>Drag &amp; Drop PDF here</p>
-        <p class="sub">or click · Max 100 MB</p>
-        <input type="file" id="fileInput" accept="application/pdf" hidden />
+        <p>Drag &amp; Drop PDF here</p><p class="sub">or click · Max 100 MB</p>
+        <input type="file" id="fileInput" accept="application/pdf" hidden/>
         <button class="btn-primary" onclick="document.getElementById('fileInput').click()">Choose File</button>
       </div>
       <div id="fileInfo" class="file-info hidden">
@@ -71,11 +135,10 @@
     <!-- MERGE -->
     <div id="panel-merge" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-layer-group"></i> Merge PDFs</h2>
-      <p class="panel-desc">Add 2+ PDFs. Preview each with the <i class="fa-solid fa-eye"></i> button, then merge.</p>
+      <p class="panel-desc">Add 2+ PDFs, preview each with <i class="fa-solid fa-eye"></i>, then merge.</p>
       <div id="mergeDropZone" class="drop-zone">
-        <i class="fa-solid fa-files drop-icon"></i>
-        <p>Drop multiple PDFs here</p>
-        <input type="file" id="mergeInput" accept="application/pdf" multiple hidden />
+        <i class="fa-solid fa-files drop-icon"></i><p>Drop multiple PDFs here</p>
+        <input type="file" id="mergeInput" accept="application/pdf" multiple hidden/>
         <button class="btn-primary" onclick="document.getElementById('mergeInput').click()">Add PDFs</button>
       </div>
       <ul id="mergeList" class="merge-list"></ul>
@@ -88,16 +151,11 @@
           <button id="mergeNextDoc" class="icon-btn" disabled><i class="fa-solid fa-chevron-right"></i></button>
         </div>
         <div class="merge-preview-canvas-wrap">
-          <div id="mergePreviewPlaceholder" class="merge-preview-placeholder">
-            <i class="fa-solid fa-layer-group"></i>
-            <p>Add PDFs to preview them here</p>
-          </div>
+          <div id="mergePreviewPlaceholder" class="merge-preview-placeholder"><i class="fa-solid fa-layer-group"></i><p>Add PDFs to preview</p></div>
           <canvas id="mergePreviewCanvas" class="hidden"></canvas>
         </div>
       </div>
-      <button id="mergeBtn" class="btn-primary" disabled>
-        <i class="fa-solid fa-layer-group"></i> Merge All &amp; Download
-      </button>
+      <button id="mergeBtn" class="btn-primary" disabled><i class="fa-solid fa-layer-group"></i> Merge All &amp; Download</button>
     </div>
 
     <!-- SPLIT -->
@@ -112,34 +170,98 @@
       <button id="splitBtn" class="btn-primary" disabled><i class="fa-solid fa-scissors"></i> Extract &amp; Download</button>
     </div>
 
+    <!-- COMPRESS -->
+    <div id="panel-compress" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-compress-arrows-alt"></i> Compress PDF</h2>
+      <p class="panel-desc">Reduce file size by adjusting render quality.</p>
+      <div class="compress-options">
+        <label class="compress-opt active" data-quality="0.92">
+          <input type="radio" name="compressQ" value="0.92" checked/>
+          <div class="compress-opt-inner"><span class="compress-opt-name">Low Compression</span><span class="compress-opt-desc">Best quality · larger file</span></div>
+        </label>
+        <label class="compress-opt" data-quality="0.65">
+          <input type="radio" name="compressQ" value="0.65"/>
+          <div class="compress-opt-inner"><span class="compress-opt-name">Medium Compression</span><span class="compress-opt-desc">Good quality · smaller file</span></div>
+        </label>
+        <label class="compress-opt" data-quality="0.35">
+          <input type="radio" name="compressQ" value="0.35"/>
+          <div class="compress-opt-inner"><span class="compress-opt-name">High Compression</span><span class="compress-opt-desc">Reduced quality · smallest file</span></div>
+        </label>
+      </div>
+      <button id="compressBtn" class="btn-primary" disabled><i class="fa-solid fa-compress-arrows-alt"></i> Compress &amp; Download</button>
+    </div>
+
+    <!-- IMAGES TO PDF -->
+    <div id="panel-imagestopdf" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-images"></i> Images to PDF</h2>
+      <p class="panel-desc">Convert JPG/PNG images into a PDF. Drag to reorder.</p>
+      <div id="imgToPdfDropZone" class="drop-zone">
+        <i class="fa-solid fa-images drop-icon"></i><p>Drop images here (JPG, PNG)</p>
+        <input type="file" id="imgToPdfInput" accept="image/jpeg,image/png" multiple hidden/>
+        <button class="btn-primary" onclick="document.getElementById('imgToPdfInput').click()">Add Images</button>
+      </div>
+      <ul id="imgToPdfList" class="img-to-pdf-list"></ul>
+      <div class="form-row">
+        <div class="form-group"><label>Page Size</label>
+          <select id="imgToPdfPageSize" class="input"><option value="A4">A4</option><option value="Letter">Letter</option><option value="fit">Fit to image</option></select>
+        </div>
+        <div class="form-group"><label>Orientation</label>
+          <select id="imgToPdfOrientation" class="input"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
+        </div>
+      </div>
+      <button id="imgToPdfBtn" class="btn-primary" disabled><i class="fa-solid fa-file-pdf"></i> Convert to PDF &amp; Download</button>
+    </div>
+
     <!-- PAGES -->
     <div id="panel-pages" class="panel panel-pages">
-      <h2 class="panel-title"><i class="fa-solid fa-th-large"></i> Manage Pages</h2>
-      <p class="panel-desc">Drag to reorder · Click to select · Toolbar to delete or rotate.</p>
+      <h2 class="panel-title"><i class="fa-solid fa-th-large"></i> Organize Pages</h2>
+      <p class="panel-desc">Drag to reorder · Click to select · Use toolbar to delete or rotate.</p>
       <div class="pages-toolbar">
         <button id="deleteSelectedBtn" class="btn-danger" disabled><i class="fa-solid fa-trash"></i> Delete</button>
-        <button id="rotateLeftBtn" class="btn-secondary" disabled><i class="fa-solid fa-rotate-left"></i> ↺</button>
+        <button id="rotateLeftBtn"  class="btn-secondary" disabled><i class="fa-solid fa-rotate-left"></i> ↺</button>
         <button id="rotateRightBtn" class="btn-secondary" disabled><i class="fa-solid fa-rotate-right"></i> ↻</button>
-        <button id="selectAllBtn" class="btn-secondary"><i class="fa-solid fa-check-double"></i> All</button>
+        <button id="selectAllBtn"   class="btn-secondary"><i class="fa-solid fa-check-double"></i> All</button>
         <button id="deselectAllBtn" class="btn-secondary"><i class="fa-solid fa-xmark"></i> None</button>
       </div>
-      <div id="pageGrid" class="page-grid">
-        <p class="hint center">Upload a PDF to manage pages.</p>
+      <div id="pageGrid" class="page-grid"><p class="hint center">Upload a PDF to manage pages.</p></div>
+    </div>
+
+    <!-- ANNOTATE -->
+    <div id="panel-annotate" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-pen-nib"></i> Annotate PDF</h2>
+      <p class="panel-desc">Pick a tool, set the page, then draw directly on the preview.</p>
+      <div class="annotate-tools">
+        <button class="annotate-tool-btn active" data-atool="freehand" title="Freehand"><i class="fa-solid fa-pen"></i></button>
+        <button class="annotate-tool-btn" data-atool="highlight" title="Highlight"><i class="fa-solid fa-highlighter"></i></button>
+        <button class="annotate-tool-btn" data-atool="rect" title="Rectangle"><i class="fa-regular fa-square"></i></button>
+        <button class="annotate-tool-btn" data-atool="ellipse" title="Ellipse"><i class="fa-regular fa-circle"></i></button>
+        <button class="annotate-tool-btn" data-atool="arrow" title="Arrow"><i class="fa-solid fa-arrow-right"></i></button>
+        <button class="annotate-tool-btn" data-atool="line" title="Line"><i class="fa-solid fa-minus"></i></button>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Color</label><input type="color" id="annotateColor" value="#f7c44f" class="input color-input"/></div>
+        <div class="form-group"><label>Stroke Size</label><input type="range" id="annotateSize" min="1" max="30" value="4" class="range-input full"/></div>
+      </div>
+      <div class="form-group"><label>Page</label><input type="number" id="annotatePage" min="1" value="1" class="input"/></div>
+      <div class="annotate-actions">
+        <button id="annotateUndoBtn"  class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Undo</button>
+        <button id="annotateClearBtn" class="btn-secondary"><i class="fa-solid fa-trash"></i> Clear</button>
+        <button id="annotateApplyBtn" class="btn-primary" disabled><i class="fa-solid fa-check"></i> Apply to PDF</button>
       </div>
     </div>
 
     <!-- TEXT -->
     <div id="panel-text" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-font"></i> Add Text</h2>
-      <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to set position.</p>
+      <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to position.</p>
       <div class="form-group"><label>Text</label><textarea id="overlayText" class="input textarea" placeholder="Text to add…"></textarea></div>
       <div class="form-row">
         <div class="form-group"><label>Page #</label><input type="number" id="textPage" min="1" value="1" class="input"/></div>
         <div class="form-group"><label>Font Size</label><input type="number" id="textSize" min="4" max="300" value="24" class="input"/></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>X (px from left)</label><input type="number" id="textX" value="50" class="input"/></div>
-        <div class="form-group"><label>Y (px from top)</label><input type="number" id="textY" value="50" class="input"/></div>
+        <div class="form-group"><label>X</label><input type="number" id="textX" value="50" class="input"/></div>
+        <div class="form-group"><label>Y (from top)</label><input type="number" id="textY" value="50" class="input"/></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Color</label><input type="color" id="textColor" value="#000000" class="input color-input"/></div>
@@ -149,10 +271,10 @@
       <button id="addTextBtn" class="btn-primary" disabled><i class="fa-solid fa-plus"></i> Add Text to PDF</button>
     </div>
 
-    <!-- IMAGE -->
+    <!-- IMAGE OVERLAY -->
     <div id="panel-image" class="panel">
       <h2 class="panel-title"><i class="fa-solid fa-image"></i> Add Image</h2>
-      <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to set position.</p>
+      <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to position.</p>
       <div class="form-group"><label>Image (PNG or JPEG)</label><input type="file" id="overlayImageInput" accept="image/png,image/jpeg" class="input file-input"/></div>
       <div class="form-row">
         <div class="form-group"><label>Page #</label><input type="number" id="imgPage" min="1" value="1" class="input"/></div>
@@ -167,19 +289,105 @@
         <div class="form-group"><label>Width</label><input type="number" id="imgW" value="150" class="input"/></div>
         <div class="form-group"><label>Height</label><input type="number" id="imgH" value="100" class="input"/></div>
       </div>
-      <button id="addImageBtn" class="btn-primary" disabled><i class="fa-solid fa-plus"></i> Embed Image into PDF</button>
+      <button id="addImageBtn" class="btn-primary" disabled><i class="fa-solid fa-plus"></i> Embed Image</button>
+    </div>
+
+    <!-- WATERMARK -->
+    <div id="panel-watermark" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-stamp"></i> Watermark</h2>
+      <p class="panel-desc">Add a text or image watermark across pages.</p>
+      <div class="tab-row">
+        <button class="tab-btn active" data-wtab="text">Text Watermark</button>
+        <button class="tab-btn" data-wtab="image">Image Watermark</button>
+      </div>
+      <div id="wmTextTab">
+        <div class="form-group"><label>Watermark Text</label><input type="text" id="wmText" class="input" placeholder="e.g. CONFIDENTIAL"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Font Size</label><input type="number" id="wmSize" value="60" class="input"/></div>
+          <div class="form-group"><label>Color</label><input type="color" id="wmColor" value="#000000" class="input color-input"/></div>
+        </div>
+      </div>
+      <div id="wmImageTab" class="hidden">
+        <div class="form-group"><label>Watermark Image</label><input type="file" id="wmImageInput" accept="image/png,image/jpeg" class="input file-input"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Width (px)</label><input type="number" id="wmImgW" value="300" class="input"/></div>
+          <div class="form-group"><label>Height (px)</label><input type="number" id="wmImgH" value="200" class="input"/></div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Opacity: <span id="wmOpacityVal">25%</span></label>
+          <input type="range" id="wmOpacity" min="5" max="100" value="25" class="range-input full"/>
+        </div>
+        <div class="form-group"><label>Angle (°)</label><input type="number" id="wmAngle" value="-45" min="-180" max="180" class="input"/></div>
+      </div>
+      <div class="form-group"><label>Apply to</label>
+        <select id="wmPages" class="input">
+          <option value="all">All pages</option>
+          <option value="odd">Odd pages only</option>
+          <option value="even">Even pages only</option>
+          <option value="first">First page only</option>
+        </select>
+      </div>
+      <button id="wmBtn" class="btn-primary" disabled><i class="fa-solid fa-stamp"></i> Apply Watermark</button>
+    </div>
+
+    <!-- PAGE NUMBERS -->
+    <div id="panel-pagenumbers" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-list-ol"></i> Page Numbers</h2>
+      <p class="panel-desc">Automatically stamp page numbers onto every page.</p>
+      <div class="form-row">
+        <div class="form-group"><label>Position</label>
+          <select id="pnPosition" class="input">
+            <option value="bottom-center">Bottom Centre</option>
+            <option value="bottom-right">Bottom Right</option>
+            <option value="bottom-left">Bottom Left</option>
+            <option value="top-center">Top Centre</option>
+            <option value="top-right">Top Right</option>
+            <option value="top-left">Top Left</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Start Number</label><input type="number" id="pnStart" value="1" min="0" class="input"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Font Size</label><input type="number" id="pnSize" value="14" class="input"/></div>
+        <div class="form-group"><label>Color</label><input type="color" id="pnColor" value="#333333" class="input color-input"/></div>
+      </div>
+      <div class="form-group"><label>Format</label>
+        <select id="pnFormat" class="input">
+          <option value="n">1 · 2 · 3</option>
+          <option value="of">1 of 12 · 2 of 12</option>
+          <option value="dash">— 1 — · — 2 —</option>
+          <option value="page">Page 1 · Page 2</option>
+        </select>
+      </div>
+      <button id="pnBtn" class="btn-primary" disabled><i class="fa-solid fa-list-ol"></i> Add Page Numbers</button>
+    </div>
+
+    <!-- REDACT -->
+    <div id="panel-redact" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-eraser"></i> Redact PDF</h2>
+      <p class="panel-desc">Set the page, then click and drag on the preview to draw redaction boxes.</p>
+      <div class="form-group"><label>Page</label><input type="number" id="redactPage" min="1" value="1" class="input"/></div>
+      <p class="hint">Draw as many boxes as needed before applying.</p>
+      <div class="annotate-actions">
+        <button id="redactUndoBtn"  class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Undo</button>
+        <button id="redactClearBtn" class="btn-secondary"><i class="fa-solid fa-trash"></i> Clear</button>
+        <button id="redactApplyBtn" class="btn-primary" disabled><i class="fa-solid fa-check"></i> Apply Redactions</button>
+      </div>
+      <p class="hint mt" style="color:var(--danger)"><i class="fa-solid fa-triangle-exclamation"></i> Redactions are permanent.</p>
     </div>
 
     <!-- SIGNATURE -->
     <div id="panel-signature" class="panel">
-      <h2 class="panel-title"><i class="fa-solid fa-signature"></i> Signature</h2>
+      <h2 class="panel-title"><i class="fa-solid fa-signature"></i> Sign PDF</h2>
       <div class="sig-canvas-wrap"><canvas id="sigCanvas" width="500" height="180"></canvas></div>
       <div class="sig-toolbar">
         <div class="form-group inline"><label>Color</label><input type="color" id="sigColor" value="#000000" class="input color-input small"/></div>
         <div class="form-group inline"><label>Stroke</label><input type="range" id="sigStroke" min="1" max="10" value="2" class="range-input"/></div>
         <button id="clearSig" class="btn-secondary"><i class="fa-solid fa-eraser"></i> Clear</button>
       </div>
-      <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to set position.</p>
+      <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to place.</p>
       <div class="form-row">
         <div class="form-group"><label>Page #</label><input type="number" id="sigPage" min="1" value="1" class="input"/></div>
         <div class="form-group" style="justify-content:flex-end"><label>&nbsp;</label>
@@ -193,13 +401,13 @@
         <div class="form-group"><label>Width</label><input type="number" id="sigW" value="200" class="input"/></div>
         <div class="form-group"><label>Height</label><input type="number" id="sigH" value="80" class="input"/></div>
       </div>
-      <button id="addSigBtn" class="btn-primary" disabled><i class="fa-solid fa-plus"></i> Embed Signature into PDF</button>
+      <button id="addSigBtn" class="btn-primary" disabled><i class="fa-solid fa-plus"></i> Embed Signature</button>
     </div>
 
     <!-- SECURITY -->
     <div id="panel-security" class="panel">
-      <h2 class="panel-title"><i class="fa-solid fa-lock"></i> Security</h2>
-      <p class="panel-desc">PDF will be downloaded. Use the <code>qpdf</code> command shown in the notification to encrypt it locally.</p>
+      <h2 class="panel-title"><i class="fa-solid fa-lock"></i> Protect PDF</h2>
+      <p class="panel-desc">Download your PDF. The notification will show a <code>qpdf</code> command to encrypt it locally.</p>
       <div class="form-group"><label>User Password</label>
         <div class="input-eye"><input type="password" id="userPassword" class="input" placeholder="Password to open…"/>
           <button class="icon-btn" onclick="togglePwd('userPassword')"><i class="fa-solid fa-eye"></i></button></div></div>
@@ -224,20 +432,22 @@
       <div class="zoom-controls">
         <button id="zoomOut" class="icon-btn" disabled><i class="fa-solid fa-minus"></i></button>
         <span id="zoomLabel">100%</span>
-        <button id="zoomIn" class="icon-btn" disabled><i class="fa-solid fa-plus"></i></button>
+        <button id="zoomIn"  class="icon-btn" disabled><i class="fa-solid fa-plus"></i></button>
       </div>
     </div>
     <div class="preview-canvas-wrap" id="previewWrap">
       <div id="previewPlaceholder" class="preview-placeholder">
-        <i class="fa-solid fa-file-pdf"></i>
-        <p>Upload a PDF to preview it here</p>
+        <i class="fa-solid fa-file-pdf"></i><p>Upload a PDF to preview it here</p>
       </div>
       <canvas id="previewCanvas" class="hidden"></canvas>
+      <canvas id="drawingLayer"  class="drawing-layer hidden"></canvas>
       <canvas id="placementOverlay" class="placement-overlay"></canvas>
     </div>
   </section>
 
 </main>
+</div>
+
 <script src="script.js"></script>
 </body>
 </html>
