@@ -159,7 +159,22 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
  * controlsId: controls to reveal after upload (optional)
  * onLoaded:  callback after pages built
  */
-function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId, onLoaded }) {
+// Map each toolName to its action button id
+const TOOL_ACTION_BTN = {
+  split:       'splitBtn',
+  compress:    'compressBtn',
+  pages:       null,   // no single action btn (grid-based)
+  annotate:    'annotateApplyBtn',
+  text:        'addTextBtn',
+  image:       'addImageBtn',
+  watermark:   'wmBtn',
+  pagenumbers: 'pnBtn',
+  redact:      'redactApplyBtn',
+  signature:   'addSigBtn',
+  security:    'applyPwdBtn',
+};
+
+function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
   const input = $(inputId);
   const zone  = $(zoneId);
   const info  = $(infoId);
@@ -184,23 +199,27 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId, onLoaded
         <button class="fi-change" onclick="resetToolUpload('${toolName}','${inputId}','${zoneId}','${infoId}','${controlsId}')">Change</button>`;
       hide(zone); show(info);
       if (controlsId) show($(controlsId));
+
+      // Enable this tool's action button
+      const btnId = TOOL_ACTION_BTN[toolName];
+      if (btnId) { const b = $(btnId); if (b) b.disabled = false; }
+
       // If this is the active tool, update preview
       if (S.activeTool === toolName) {
         S.curPage = 1;
         await previewMain(1);
         updateDownloadBtn();
-        if (toolName === 'pages') renderGrid();
+        if (toolName === 'pages')   { show($('pagesToolbar')); renderGrid(); }
         if (toolName === 'annotate') enterAnnotateMode();
         if (toolName === 'redact')   enterRedactMode();
-        updateSplitHint();
+        if (toolName === 'split')    updateSplitHint();
       }
-      onLoaded && onLoaded(doc);
-      toast(`Loaded ${doc.numPages} pages`, 'success');
+      toast(`Loaded "${file.name}" — ${doc.numPages} pages`, 'success');
     } catch (e) { console.error(e); toast(`Load failed: ${e.message}`, 'error'); }
     finally { loading(false); }
   }
 
-  input.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  input.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
   zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
   zone.addEventListener('drop', e => {
@@ -214,6 +233,9 @@ window.resetToolUpload = (toolName, inputId, zoneId, infoId, controlsId) => {
   $(inputId).value = '';
   show($(zoneId)); hide($(infoId));
   if (controlsId) hide($(controlsId));
+  // Disable the tool's action button
+  const btnId = TOOL_ACTION_BTN[toolName];
+  if (btnId) { const b = $(btnId); if (b) b.disabled = true; }
   if (S.activeTool === toolName) {
     hide($('previewCanvas')); show($('previewPlaceholder'));
     $('pageIndicator').textContent = '— / —';
@@ -493,12 +515,7 @@ $('splitBtn').addEventListener('click', async () => {
   catch(e){ console.error(e); toast(`Split failed: ${e.message}`,'error'); }
   finally { loading(false); }
 });
-// Update hint whenever split tool loads a file
-const _origSplitWire = wirePdfUpload;
-// Patch: after split loads, call updateSplitHint
-// (Already handled by wirePdfUpload onLoaded callback — but we need to hook it)
-// Re-wire split with onLoaded:
-wirePdfUpload({ toolName:'split', inputId:'splitFileInput', zoneId:'splitUploadZone', infoId:'splitFileInfo', controlsId:null, onLoaded: () => updateSplitHint() });
+
 
 /* ── COMPRESS ── */
 document.querySelectorAll('.compress-opt').forEach(opt => {
