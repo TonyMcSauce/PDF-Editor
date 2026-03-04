@@ -908,12 +908,25 @@ $('downloadBtn').addEventListener('click',async()=>{
 const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
 
 [
-  { tool:'pdftoword',  inputId:'pdftowordInput',  zoneId:'pdftowordUploadZone',  infoId:'pdftowordFileInfo',  btnId:'pdftowordBtn',  statusId:'pdftowordStatus',  endpoint:'/convert/word',  ext:'docx', label:'Word' },
-  { tool:'pdftoexcel', inputId:'pdftoexcelInput', zoneId:'pdftoexcelUploadZone', infoId:'pdftoexcelFileInfo', btnId:'pdftoexcelBtn', statusId:'pdftoexcelStatus', endpoint:'/convert/excel', ext:'xlsx', label:'Excel' },
-  { tool:'pdftopptx',  inputId:'pdftopptxInput',  zoneId:'pdftopptxUploadZone',  infoId:'pdftopptxFileInfo',  btnId:'pdftopptxBtn',  statusId:'pdftopptxStatus',  endpoint:'/convert/pptx',  ext:'pptx', label:'PowerPoint' },
-].forEach(({ tool, inputId, zoneId, infoId, btnId, statusId, endpoint, ext, label }) => {
+  { tool:'pdftoword',  zoneId:'pdftowordUploadZone',  infoId:'pdftowordFileInfo',  btnId:'pdftowordBtn',  statusId:'pdftowordStatus',  endpoint:'/convert/word',  ext:'docx', label:'Word' },
+  { tool:'pdftoexcel', zoneId:'pdftoexcelUploadZone', infoId:'pdftoexcelFileInfo', btnId:'pdftoexcelBtn', statusId:'pdftoexcelStatus', endpoint:'/convert/excel', ext:'xlsx', label:'Excel' },
+  { tool:'pdftopptx',  zoneId:'pdftopptxUploadZone',  infoId:'pdftopptxFileInfo',  btnId:'pdftopptxBtn',  statusId:'pdftopptxStatus',  endpoint:'/convert/pptx',  ext:'pptx', label:'PowerPoint' },
+].forEach(({ tool, zoneId, infoId, btnId, statusId, endpoint, ext, label }) => {
 
   let storedFile = null;
+
+  // Create a fresh file input dynamically — avoids hidden input issues across browsers
+  function makeInput() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'application/pdf';
+    inp.style.cssText = 'position:fixed;top:-999px;left:-999px;opacity:0;';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      if (inp.files[0]) handleFile(inp.files[0]);
+      document.body.removeChild(inp);
+    });
+    return inp;
+  }
 
   function setStatus(type, msg) {
     const el = $(statusId);
@@ -933,18 +946,33 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
         <div class="fi-name">${file.name}</div>
         <div class="fi-size">${fmtSize(file.size)}</div>
       </div>
-      <button class="fi-change" onclick="resetServerTool('${inputId}','${zoneId}','${infoId}','${btnId}','${statusId}')">Change</button>`;
+      <button class="fi-change" id="change-${tool}">Change</button>`;
+    $(`change-${tool}`).addEventListener('click', () => resetServerTool(tool, zoneId, infoId, btnId, statusId));
     hide($(zoneId)); show($(infoId));
     $(btnId).disabled = false;
     setStatus(null);
+    toast(`Loaded "${file.name}"`, 'success');
   }
 
-  $(inputId).addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
-
+  // Whole zone is clickable
   const zone = $(zoneId);
+  zone.addEventListener('click', e => {
+    // Don't trigger if they clicked the inner button (it will trigger too)
+    if (e.target.tagName === 'BUTTON') return;
+    makeInput().click();
+  });
+  // The "Choose PDF" button inside the zone
+  zone.querySelector('button')?.addEventListener('click', e => {
+    e.stopPropagation();
+    makeInput().click();
+  });
+
   zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
 
   $(btnId).addEventListener('click', async () => {
     if (!storedFile) return;
@@ -979,12 +1007,12 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
   });
 });
 
-window.resetServerTool = (inputId, zoneId, infoId, btnId, statusId) => {
-  $(inputId).value = '';
+function resetServerTool(tool, zoneId, infoId, btnId, statusId) {
   show($(zoneId)); hide($(infoId));
   $(btnId).disabled = true;
   hide($(statusId));
-};
+}
+window.resetServerTool = resetServerTool;
 
 /* ── INIT ── */
 showHome();
