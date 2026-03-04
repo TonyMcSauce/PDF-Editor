@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pdf-studio-server
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: apt-get update && apt-get install -y libreoffice && npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
