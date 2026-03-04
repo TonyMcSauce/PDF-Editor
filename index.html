@@ -98,11 +98,25 @@
       <div class="tool-card-icon" style="--c:#f74f6a"><i class="fa-solid fa-lock"></i></div>
       <div class="tool-card-text"><h3>Protect PDF</h3><p>Password-protect your document</p></div>
     </div>
+
+    <!-- SERVER-SIDE CONVERSIONS -->
+    <div class="tool-card tool-card-server" data-tool="pdftoword">
+      <div class="tool-card-icon" style="--c:#2b7cd3"><i class="fa-solid fa-file-word"></i></div>
+      <div class="tool-card-text"><h3>PDF to Word <span class="server-badge">Server</span></h3><p>Convert PDF into an editable DOCX file</p></div>
+    </div>
+    <div class="tool-card tool-card-server" data-tool="pdftoexcel">
+      <div class="tool-card-icon" style="--c:#1d7044"><i class="fa-solid fa-file-excel"></i></div>
+      <div class="tool-card-text"><h3>PDF to Excel <span class="server-badge">Server</span></h3><p>Extract tables into an editable XLSX file</p></div>
+    </div>
+    <div class="tool-card tool-card-server" data-tool="pdftopptx">
+      <div class="tool-card-icon" style="--c:#c43e1c"><i class="fa-solid fa-file-powerpoint"></i></div>
+      <div class="tool-card-text"><h3>PDF to PowerPoint <span class="server-badge">Server</span></h3><p>Convert PDF slides into editable PPTX</p></div>
+    </div>
   </div>
 
   <p class="home-note">
     <i class="fa-solid fa-shield-halved"></i>
-    Your files never leave your browser. All processing is 100% local.
+    Most tools run 100% in your browser. <i class="fa-solid fa-server" style="margin-left:8px"></i> Server tools use your private Render server.
   </p>
 </div>
 
@@ -128,6 +142,10 @@
       <button class="tool-btn" data-panel="redact"><i class="fa-solid fa-eraser"></i><span>Redact</span></button>
       <button class="tool-btn" data-panel="signature"><i class="fa-solid fa-signature"></i><span>Sign</span></button>
       <button class="tool-btn" data-panel="security"><i class="fa-solid fa-lock"></i><span>Protect</span></button>
+      <div class="sidebar-divider"></div>
+      <button class="tool-btn tool-btn-server" data-panel="pdftoword"><i class="fa-solid fa-file-word"></i><span>→ Word</span></button>
+      <button class="tool-btn tool-btn-server" data-panel="pdftoexcel"><i class="fa-solid fa-file-excel"></i><span>→ Excel</span></button>
+      <button class="tool-btn tool-btn-server" data-panel="pdftopptx"><i class="fa-solid fa-file-powerpoint"></i><span>→ PPTX</span></button>
     </nav>
     <div class="sidebar-bottom">
       <button id="downloadBtn" class="download-btn" disabled>
@@ -604,6 +622,84 @@
         <button id="applyPwdBtn" class="btn-action"><i class="fa-solid fa-download"></i> Download + Encryption Tip</button>
         <p class="hint mt">Nothing is sent to any server.</p>
       </div>
+    </div>
+
+    <!-- ── PDF TO WORD ── -->
+    <div id="panel-pdftoword" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-file-word" style="color:#2b7cd3"></i> PDF to Word</h2>
+      <p class="panel-desc">Convert your PDF into an editable DOCX file using your conversion server.</p>
+
+      <div class="server-notice">
+        <i class="fa-solid fa-server"></i>
+        <span>Converted on your private Render server · Files are deleted immediately after download</span>
+      </div>
+
+      <div class="tool-upload-zone" id="pdftowordUploadZone">
+        <i class="fa-solid fa-file-arrow-up"></i>
+        <p>Drop your PDF here or click to upload</p>
+        <input type="file" id="pdftowordInput" accept="application/pdf" hidden/>
+        <button class="btn-primary" onclick="document.getElementById('pdftowordInput').click()">
+          <i class="fa-solid fa-upload"></i> Choose PDF
+        </button>
+      </div>
+      <div id="pdftowordFileInfo" class="tool-file-info hidden"></div>
+
+      <button id="pdftowordBtn" class="btn-action btn-word" disabled>
+        <i class="fa-solid fa-file-word"></i> Convert to Word &amp; Download
+      </button>
+      <div id="pdftowordStatus" class="convert-status hidden"></div>
+    </div>
+
+    <!-- ── PDF TO EXCEL ── -->
+    <div id="panel-pdftoexcel" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-file-excel" style="color:#1d7044"></i> PDF to Excel</h2>
+      <p class="panel-desc">Extract tables and data from your PDF into an editable XLSX file.</p>
+
+      <div class="server-notice">
+        <i class="fa-solid fa-server"></i>
+        <span>Converted on your private Render server · Files are deleted immediately after download</span>
+      </div>
+
+      <div class="tool-upload-zone" id="pdftoexcelUploadZone">
+        <i class="fa-solid fa-file-arrow-up"></i>
+        <p>Drop your PDF here or click to upload</p>
+        <input type="file" id="pdftoexcelInput" accept="application/pdf" hidden/>
+        <button class="btn-primary" onclick="document.getElementById('pdftoexcelInput').click()">
+          <i class="fa-solid fa-upload"></i> Choose PDF
+        </button>
+      </div>
+      <div id="pdftoexcelFileInfo" class="tool-file-info hidden"></div>
+
+      <button id="pdftoexcelBtn" class="btn-action btn-excel" disabled>
+        <i class="fa-solid fa-file-excel"></i> Convert to Excel &amp; Download
+      </button>
+      <div id="pdftoexcelStatus" class="convert-status hidden"></div>
+    </div>
+
+    <!-- ── PDF TO POWERPOINT ── -->
+    <div id="panel-pdftopptx" class="panel">
+      <h2 class="panel-title"><i class="fa-solid fa-file-powerpoint" style="color:#c43e1c"></i> PDF to PowerPoint</h2>
+      <p class="panel-desc">Convert your PDF pages into editable PowerPoint slides.</p>
+
+      <div class="server-notice">
+        <i class="fa-solid fa-server"></i>
+        <span>Converted on your private Render server · Files are deleted immediately after download</span>
+      </div>
+
+      <div class="tool-upload-zone" id="pdftopptxUploadZone">
+        <i class="fa-solid fa-file-arrow-up"></i>
+        <p>Drop your PDF here or click to upload</p>
+        <input type="file" id="pdftopptxInput" accept="application/pdf" hidden/>
+        <button class="btn-primary" onclick="document.getElementById('pdftopptxInput').click()">
+          <i class="fa-solid fa-upload"></i> Choose PDF
+        </button>
+      </div>
+      <div id="pdftopptxFileInfo" class="tool-file-info hidden"></div>
+
+      <button id="pdftopptxBtn" class="btn-action btn-pptx" disabled>
+        <i class="fa-solid fa-file-powerpoint"></i> Convert to PowerPoint &amp; Download
+      </button>
+      <div id="pdftopptxStatus" class="convert-status hidden"></div>
     </div>
 
   </section><!-- /panel-area -->

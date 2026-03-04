@@ -900,7 +900,92 @@ $('downloadBtn').addEventListener('click',async()=>{
   finally{ loading(false); }
 });
 
+/* ══════════════════════════════════════════════════
+   SERVER-SIDE CONVERSIONS
+   PDF → Word / Excel / PowerPoint via Render server
+══════════════════════════════════════════════════ */
+
+const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
+
+[
+  { tool:'pdftoword',  inputId:'pdftowordInput',  zoneId:'pdftowordUploadZone',  infoId:'pdftowordFileInfo',  btnId:'pdftowordBtn',  statusId:'pdftowordStatus',  endpoint:'/convert/word',  ext:'docx', label:'Word' },
+  { tool:'pdftoexcel', inputId:'pdftoexcelInput', zoneId:'pdftoexcelUploadZone', infoId:'pdftoexcelFileInfo', btnId:'pdftoexcelBtn', statusId:'pdftoexcelStatus', endpoint:'/convert/excel', ext:'xlsx', label:'Excel' },
+  { tool:'pdftopptx',  inputId:'pdftopptxInput',  zoneId:'pdftopptxUploadZone',  infoId:'pdftopptxFileInfo',  btnId:'pdftopptxBtn',  statusId:'pdftopptxStatus',  endpoint:'/convert/pptx',  ext:'pptx', label:'PowerPoint' },
+].forEach(({ tool, inputId, zoneId, infoId, btnId, statusId, endpoint, ext, label }) => {
+
+  let storedFile = null;
+
+  function setStatus(type, msg) {
+    const el = $(statusId);
+    if (!type) { hide(el); return; }
+    el.className = `convert-status ${type}`;
+    el.textContent = msg;
+    show(el);
+  }
+
+  function handleFile(file) {
+    if (!file || file.type !== 'application/pdf') { toast('Please select a valid PDF.', 'error'); return; }
+    if (!okSize(file)) return;
+    storedFile = file;
+    $(infoId).innerHTML = `
+      <i class="fa-solid fa-file-pdf fi-icon"></i>
+      <div style="flex:1;min-width:0">
+        <div class="fi-name">${file.name}</div>
+        <div class="fi-size">${fmtSize(file.size)}</div>
+      </div>
+      <button class="fi-change" onclick="resetServerTool('${inputId}','${zoneId}','${infoId}','${btnId}','${statusId}')">Change</button>`;
+    hide($(zoneId)); show($(infoId));
+    $(btnId).disabled = false;
+    setStatus(null);
+  }
+
+  $(inputId).addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
+
+  const zone = $(zoneId);
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+
+  $(btnId).addEventListener('click', async () => {
+    if (!storedFile) return;
+    $(btnId).disabled = true;
+    setStatus('working', `Converting to ${label}… may take 30–60s if server just woke up`);
+    try {
+      const formData = new FormData();
+      formData.append('file', storedFile, storedFile.name);
+      const res = await fetch(`${SERVER_URL}${endpoint}`, { method:'POST', body:formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error:`Server error ${res.status}` }));
+        throw new Error(err.error || `Server error ${res.status}`);
+      }
+      const blob = await res.blob();
+      const outName = storedFile.name.replace(/\.pdf$/i, '') + '.' + ext;
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement('a'), { href:url, download:outName });
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+      setStatus('done', `✓ Converted successfully — check your downloads`);
+      toast(`${label} file downloaded!`, 'success');
+    } catch(err) {
+      console.error(err);
+      const msg = (err.message.includes('fetch') || err.message.includes('Failed to fetch'))
+        ? 'Server is waking up (free tier sleeps). Wait 30s and try again.'
+        : err.message;
+      setStatus('fail', `✗ ${msg}`);
+      toast(msg, 'error', 7000);
+    } finally {
+      $(btnId).disabled = false;
+    }
+  });
+});
+
+window.resetServerTool = (inputId, zoneId, infoId, btnId, statusId) => {
+  $(inputId).value = '';
+  show($(zoneId)); hide($(infoId));
+  $(btnId).disabled = true;
+  hide($(statusId));
+};
+
 /* ── INIT ── */
 showHome();
 console.log('%c PDF Studio v7 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
-console.log('Each tool has its own independent upload. Home button always visible.');

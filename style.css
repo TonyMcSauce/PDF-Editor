@@ -408,6 +408,54 @@ select.input { cursor:pointer }
 
 .hidden { display:none!important }
 
+/* ── SERVER TOOL STYLES ── */
+.server-badge {
+  display:inline-block; font-size:.6rem; font-weight:700; padding:1px 5px;
+  background:var(--accent-dim); color:var(--accent); border-radius:4px;
+  border:1px solid var(--accent); vertical-align:middle; margin-left:4px;
+  letter-spacing:.04em; text-transform:uppercase;
+}
+.tool-card-server { border-style:solid; }
+.tool-card-server:hover { border-color:var(--accent) }
+
+.sidebar-divider {
+  height:1px; background:var(--border); margin:6px 4px;
+}
+.tool-btn-server { opacity:.9 }
+.tool-btn-server i { color:var(--accent) }
+
+.server-notice {
+  display:flex; align-items:flex-start; gap:10px; padding:10px 12px;
+  background:var(--accent-dim); border:1px solid var(--accent);
+  border-radius:var(--r); font-size:.78rem; color:var(--muted); line-height:1.5;
+}
+.server-notice i { color:var(--accent); flex-shrink:0; margin-top:2px }
+
+.btn-word  { background:#2b7cd3 }
+.btn-word:hover:not(:disabled)  { background:#1a6abf }
+.btn-excel { background:#1d7044 }
+.btn-excel:hover:not(:disabled) { background:#155c37 }
+.btn-pptx  { background:#c43e1c }
+.btn-pptx:hover:not(:disabled)  { background:#a83416 }
+
+.convert-status {
+  display:flex; align-items:center; gap:10px; padding:12px 14px;
+  border-radius:var(--r); font-size:.82rem; font-family:var(--mono);
+}
+.convert-status.working {
+  background:var(--accent-dim); border:1px solid var(--accent); color:var(--accent);
+}
+.convert-status.working::before {
+  content:''; width:14px; height:14px; border:2px solid var(--accent);
+  border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0;
+}
+.convert-status.done {
+  background:rgba(79,200,122,.12); border:1px solid var(--success); color:var(--success);
+}
+.convert-status.fail {
+  background:var(--danger-dim); border:1px solid var(--danger); color:var(--danger);
+}
+
 /* ── RESPONSIVE ── */
 @media(max-width:1050px) { :root { --pw:290px } }
 @media(max-width:820px) {
