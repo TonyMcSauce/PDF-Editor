@@ -470,7 +470,11 @@ select.input { cursor:pointer }
   border-radius:3px; cursor:se-resize; z-index:102;
   border:2px solid #fff;
 }
-#textBoxLayer { position:absolute; inset:0; pointer-events:none; z-index:99 }
+#textBoxLayer { 
+  position:absolute; top:20px; left:20px; right:20px; bottom:20px; 
+  pointer-events:none; z-index:150; overflow:visible;
+}
+#textBoxLayer.active { pointer-events:all; cursor:crosshair }
 #textBoxLayer .inline-textbox { pointer-events:all }
 
 /* Floating toolbar */

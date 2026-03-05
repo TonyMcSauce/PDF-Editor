@@ -735,10 +735,12 @@ const floatDel    = $('tbFloatDel');
 function tbEnter() {
   TB.active = true;
   $('previewWrap').classList.add('text-mode');
+  $('textBoxLayer').classList.add('active');
 }
 function tbExit() {
   TB.active = false;
   $('previewWrap').classList.remove('text-mode');
+  $('textBoxLayer').classList.remove('active');
   tbHideFloat();
 }
 function tbCheckEnter() {
@@ -930,17 +932,14 @@ function tbMakeDraggable(boxEl, contentEl, resizeEl) {
   document.addEventListener('mouseup', () => { mode = null; });
 }
 
-// ── Click on preview to place text box ────────────
-$('previewWrap').addEventListener('click', e => {
+// ── Click on textBoxLayer to place text box ────────────
+$('textBoxLayer').addEventListener('click', e => {
   if (!TB.active) return;
   if (e.target.closest('.inline-textbox')) return;
-  const wrap = $('previewWrap');
-  const rect = wrap.getBoundingClientRect();
-  // Account for scroll offset
-  const scrollTop  = wrap.scrollTop  || 0;
-  const scrollLeft = wrap.scrollLeft || 0;
-  const xPx = e.clientX - rect.left  + scrollLeft;
-  const yPx = e.clientY - rect.top   + scrollTop;
+  const canvas = $('previewCanvas');
+  const rect   = canvas.getBoundingClientRect();
+  const xPx    = e.clientX - rect.left;
+  const yPx    = e.clientY - rect.top;
   tbCreate(xPx, yPx);
 });
 
