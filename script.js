@@ -210,10 +210,11 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
         S.curPage = 1;
         await previewMain(1);
         updateDownloadBtn();
-        if (toolName === 'pages')   { show($('pagesToolbar')); renderGrid(); }
+        if (toolName === 'pages')    { show($('pagesToolbar')); renderGrid(); }
         if (toolName === 'annotate') enterAnnotateMode();
         if (toolName === 'redact')   enterRedactMode();
         if (toolName === 'split')    updateSplitHint();
+        if (toolName === 'text')     tbCheckEnter();
       }
       toast(`Loaded "${file.name}" — ${doc.numPages} pages`, 'success');
     } catch (e) { console.error(e); toast(`Load failed: ${e.message}`, 'error'); }
