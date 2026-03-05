@@ -35,23 +35,23 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 
-<!-- Floating text box toolbar (appears above active text box) -->
+<!-- Floating text toolbar (appears above selected text box) -->
 <div id="tbFloatBar" class="tb-float-bar hidden">
-  <select id="tbFloatFont" class="tb-float-select">
+  <select id="tbFloatFont" class="tb-float-select" title="Font">
     <option value="Arial">Arial</option>
     <option value="Times New Roman">Times New Roman</option>
-    <option value="Courier New">Courier</option>
+    <option value="Courier New">Courier New</option>
     <option value="Georgia">Georgia</option>
     <option value="Verdana">Verdana</option>
   </select>
-  <input type="number" id="tbFloatSize" class="tb-float-size" value="16" min="6" max="200"/>
-  <input type="color"  id="tbFloatColor" class="tb-float-color" value="#000000"/>
+  <input type="number" id="tbFloatSize" class="tb-float-size" value="16" min="6" max="200" title="Font size"/>
+  <input type="color"  id="tbFloatColor" class="tb-float-color" value="#000000" title="Color"/>
+  <div class="tb-float-sep"></div>
   <button id="tbFloatBold"   class="tb-float-btn" title="Bold"><b>B</b></button>
   <button id="tbFloatItalic" class="tb-float-btn" title="Italic"><i>I</i></button>
   <div class="tb-float-sep"></div>
-  <button id="tbFloatDel" class="tb-float-btn tb-float-del" title="Delete">
-    <i class="fa-solid fa-trash"></i>
-  </button>
+  <button id="tbFloatDup"  class="tb-float-btn" title="Duplicate"><i class="fa-solid fa-copy"></i></button>
+  <button id="tbFloatDel"  class="tb-float-btn tb-float-del" title="Delete"><i class="fa-solid fa-trash"></i></button>
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
@@ -393,14 +393,14 @@
       <div id="textControls" class="tool-controls hidden">
         <div class="text-hint-bar">
           <i class="fa-solid fa-arrow-pointer"></i>
-          Click anywhere on the page to add a text box
+          Click anywhere on the page preview to add a text box
         </div>
 
-        <!-- Default style toolbar -->
+        <div class="text-defaults-label">Default style for new boxes:</div>
         <div class="text-toolbar">
-          <div class="form-group">
+          <div class="tbar-group">
             <label>Font</label>
-            <select id="textFontFamily" class="input input-sm">
+            <select id="tbDefFont" class="input input-sm" style="width:120px">
               <option value="Arial">Arial</option>
               <option value="Times New Roman">Times New Roman</option>
               <option value="Courier New">Courier New</option>
@@ -408,22 +408,22 @@
               <option value="Verdana">Verdana</option>
             </select>
           </div>
-          <div class="form-group">
+          <div class="tbar-group">
             <label>Size</label>
-            <input type="number" id="textFontSize" min="6" max="200" value="16" class="input input-sm"/>
+            <input type="number" id="tbDefSize" min="6" max="200" value="16" class="input input-sm"/>
           </div>
-          <div class="form-group">
+          <div class="tbar-group">
             <label>Color</label>
-            <input type="color" id="textFontColor" value="#000000" class="input color-input"/>
+            <input type="color" id="tbDefColor" value="#000000" class="input color-input"/>
           </div>
-          <div class="text-style-btns">
-            <button id="textBoldBtn"   class="text-style-btn" title="Bold"><b>B</b></button>
-            <button id="textItalicBtn" class="text-style-btn" title="Italic"><i>I</i></button>
+          <div class="tbar-group" style="flex-direction:row;align-items:flex-end;gap:4px">
+            <button id="tbDefBold"   class="tstyle-btn" title="Bold"><b>B</b></button>
+            <button id="tbDefItalic" class="tstyle-btn" title="Italic"><i>I</i></button>
           </div>
         </div>
 
-        <button id="addTextBtn" class="btn-action" disabled>
-          <i class="fa-solid fa-check"></i> Apply Text to PDF
+        <button id="addTextBtn" class="btn-action" style="margin-top:12px" disabled>
+          <i class="fa-solid fa-check"></i> Apply Text to PDF &amp; Download
         </button>
       </div>
     </div>

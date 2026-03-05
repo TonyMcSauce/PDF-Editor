@@ -281,7 +281,11 @@ function drawOverlaysOnCanvas(canvas, overlays, vp) {
   overlays.forEach(o => {
     ctx.save();
     if (o.type === 'text') {
-      ctx.font = `${o.size * sc}px Arial`; ctx.fillStyle = o.color || '#000';
+      const weight = o.bold   ? 'bold '   : '';
+      const style2 = o.italic ? 'italic ' : '';
+      const face   = o.font   || 'Arial';
+      ctx.font      = `${style2}${weight}${o.size * sc}px ${face}`;
+      ctx.fillStyle = o.color || '#000';
       ctx.fillText(o.text, o.x * sc, o.y * sc + o.size * sc);
     } else if (o.type === 'image' || o.type === 'signature') {
       if (o.imgEl) ctx.drawImage(o.imgEl, o.x*sc, o.y*sc, o.w*sc, o.h*sc);
@@ -714,25 +718,59 @@ $('annotateApplyBtn').addEventListener('click',async()=>{
   toast('Annotations applied!','success');
 });
 
-/* ══════════════════════════════════════════════════
-   INLINE TEXT BOXES  (Smallpdf-style)
-══════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════
+   TEXT TOOL  —  SimplePDF-style inline text boxes
+   
+   How it works:
+   1. textBoxLayer (absolute div over canvas) receives clicks
+   2. Click on empty space → create box at cursor
+   3. Each box: contenteditable div + ✕ delete btn + SE resize handle
+   4. Clicking box border (not content) → drag to move
+   5. Float toolbar appears above selected box (font/size/color/B/I/delete)
+   6. Apply → compute PDF coords via canvas bounding rect, burn in
+   
+   Coordinate system:
+   - Boxes are positioned relative to textBoxLayer
+   - textBoxLayer overlaps the canvas exactly (same inset as canvas padding)
+   - On apply: box.left/top → canvas-relative → PDF-space via viewport scale
+══════════════════════════════════════════════════════════════ */
+
 const TB = {
-  boxes:  [],   // { id, el, contentEl, page, xPx, yPx, style }
-  nextId: 1,
-  active: false,
+  boxes:      [],      // { id, el, contentEl, page }
+  nextId:     1,
+  active:     false,
   selectedId: null,
 };
 
-// ── Float bar refs ─────────────────────────────────
-const floatBar    = $('tbFloatBar');
-const floatFont   = $('tbFloatFont');
-const floatSize   = $('tbFloatSize');
-const floatColor  = $('tbFloatColor');
-const floatBold   = $('tbFloatBold');
-const floatItalic = $('tbFloatItalic');
-const floatDel    = $('tbFloatDel');
+// ── Grab float bar elements ────────────────────────
+const tbFB    = () => $('tbFloatBar');
+const tbFFont = () => $('tbFloatFont');
+const tbFSize = () => $('tbFloatSize');
+const tbFClr  = () => $('tbFloatColor');
+const tbFBold = () => $('tbFloatBold');
+const tbFItal = () => $('tbFloatItalic');
 
+// ── Helper: read default style from sidebar ────────
+function tbDefaultStyle() {
+  return {
+    font:   $('tbDefFont')?.value  || 'Arial',
+    size:   parseInt($('tbDefSize')?.value)  || 16,
+    color:  $('tbDefColor')?.value || '#000000',
+    bold:   !!$('tbDefBold')?.classList.contains('active'),
+    italic: !!$('tbDefItalic')?.classList.contains('active'),
+  };
+}
+
+// ── Apply a style object to a DOM element ─────────
+function tbApplyStyleToEl(el, s) {
+  el.style.fontFamily = s.font;
+  el.style.fontSize   = s.size + 'px';
+  el.style.color      = s.color;
+  el.style.fontWeight = s.bold   ? 'bold'   : 'normal';
+  el.style.fontStyle  = s.italic ? 'italic' : 'normal';
+}
+
+// ── Mode enter/exit ───────────────────────────────
 function tbEnter() {
   TB.active = true;
   $('previewWrap').classList.add('text-mode');
@@ -742,299 +780,307 @@ function tbExit() {
   TB.active = false;
   $('previewWrap').classList.remove('text-mode');
   $('textBoxLayer').classList.remove('active');
-  tbHideFloat();
+  tbDeselect();
 }
 function tbCheckEnter() {
   if (S.activeTool === 'text' && S.toolPages['text']?.length) tbEnter();
   else tbExit();
 }
-function tbUpdateApplyBtn() {
-  $('addTextBtn').disabled = TB.boxes.length === 0;
+
+// ── Float bar positioning ─────────────────────────
+function tbPositionBar(boxEl) {
+  const fb = tbFB(); if (!fb) return;
+  const br  = boxEl.getBoundingClientRect();
+  const fbH = fb.offsetHeight || 42;
+  const fbW = fb.offsetWidth  || 310;
+  let top  = br.top - fbH - 10;
+  if (top < 60) top = br.bottom + 10;                 // flip below if no space
+  let left = br.left;
+  if (left + fbW > window.innerWidth - 8) left = window.innerWidth - fbW - 8;
+  fb.style.top  = Math.max(4, top) + 'px';
+  fb.style.left = Math.max(4, left) + 'px';
+  fb.classList.remove('hidden');
 }
+function tbHideBar() { tbFB()?.classList.add('hidden'); }
 
-// ── Floating toolbar position ──────────────────────
-function tbShowFloat(boxEl) {
-  const rect = boxEl.getBoundingClientRect();
-  const barH = 42;
-  let top = rect.top - barH - 8;
-  if (top < 8) top = rect.bottom + 8;
-  floatBar.style.top  = top + 'px';
-  floatBar.style.left = Math.max(8, rect.left) + 'px';
-  floatBar.classList.remove('hidden');
-}
-function tbHideFloat() {
-  floatBar.classList.add('hidden');
-  TB.selectedId = null;
-}
-
-// ── Sync float bar to a box's style ───────────────
-function tbSyncFloat(id) {
-  const box = TB.boxes.find(b => b.id === id);
-  if (!box) return;
-  floatFont.value  = box.style.font;
-  floatSize.value  = box.style.size;
-  floatColor.value = box.style.color;
-  floatBold.classList.toggle('active',   box.style.bold);
-  floatItalic.classList.toggle('active', box.style.italic);
-}
-
-// ── Apply float bar state to selected box ─────────
-function tbApplyFloat() {
-  const box = TB.boxes.find(b => b.id === TB.selectedId);
-  if (!box) return;
-  box.style.font   = floatFont.value;
-  box.style.size   = parseInt(floatSize.value) || 16;
-  box.style.color  = floatColor.value;
-  box.style.bold   = floatBold.classList.contains('active');
-  box.style.italic = floatItalic.classList.contains('active');
-  const ce = box.contentEl;
-  ce.style.fontFamily = box.style.font;
-  ce.style.fontSize   = box.style.size + 'px';
-  ce.style.color      = box.style.color;
-  ce.style.fontWeight = box.style.bold   ? 'bold'   : 'normal';
-  ce.style.fontStyle  = box.style.italic ? 'italic' : 'normal';
-}
-
-// Float bar events
-floatFont.addEventListener('change',  tbApplyFloat);
-floatSize.addEventListener('input',   tbApplyFloat);
-floatColor.addEventListener('input',  tbApplyFloat);
-floatBold.addEventListener('click',   () => { floatBold.classList.toggle('active');   tbApplyFloat(); });
-floatItalic.addEventListener('click', () => { floatItalic.classList.toggle('active'); tbApplyFloat(); });
-floatDel.addEventListener('click',    () => { if (TB.selectedId) tbRemove(TB.selectedId); });
-
-// ── Create text box ────────────────────────────────
-function tbCreate(xPx, yPx) {
-  const style = {
-    font:   $('textFontFamily')?.value  || 'Arial',
-    size:   parseInt($('textFontSize')?.value) || 16,
-    color:  $('textFontColor')?.value   || '#000000',
-    bold:   $('txtBold')?.classList.contains('active'),
-    italic: $('txtItalic')?.classList.contains('active'),
-  };
-  const id = TB.nextId++;
-  const layer = $('textBoxLayer');
-
-  const box = document.createElement('div');
-  box.className = 'inline-textbox';
-  box.dataset.tbid = id;
-  box.style.left = xPx + 'px';
-  box.style.top  = yPx + 'px';
-
-  const content = document.createElement('div');
-  content.className = 'tb-content';
-  content.contentEditable = 'true';
-  content.spellcheck = false;
-  content.setAttribute('placeholder', 'Type here…');
-  content.style.fontFamily = style.font;
-  content.style.fontSize   = style.size + 'px';
-  content.style.color      = style.color;
-  content.style.fontWeight = style.bold   ? 'bold'   : 'normal';
-  content.style.fontStyle  = style.italic ? 'italic' : 'normal';
-
-  const del = document.createElement('button');
-  del.className = 'tb-delete';
-  del.textContent = '✕';
-  del.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
-  del.addEventListener('click',     e => { e.stopPropagation(); tbRemove(id); });
-
-  const resizeHandle = document.createElement('div');
-  resizeHandle.className = 'tb-resize-handle';
-
-  const dragBar = document.createElement('div');
-  dragBar.className = 'tb-drag-bar';
-
-  box.appendChild(dragBar);
-  box.appendChild(content);
-  box.appendChild(del);
-  box.appendChild(resizeHandle);
-  layer.appendChild(box);
-
-  // Drag handle = the box border (not content, not buttons)
-  tbMakeDraggable(box, content, resizeHandle);
-
-  // Select when clicking border area
-  box.addEventListener('mousedown', e => {
-    e.stopPropagation(); // prevent layer from firing
-    tbSelectBox(id);
-  });
-  content.addEventListener('focus', () => tbSelectBox(id));
-
-  const record = { id, el: box, contentEl: content, page: S.curPage, xPx, yPx, style };
-  TB.boxes.push(record);
-  tbUpdateApplyBtn();
-  tbSelectBox(id);
-  setTimeout(() => content.focus(), 20);
-  return record;
-}
-
-function tbSelectBox(id) {
+// ── Selection ────────────────────────────────────
+function tbSelect(id) {
   TB.selectedId = id;
   TB.boxes.forEach(b => b.el.classList.toggle('selected', b.id === id));
   const box = TB.boxes.find(b => b.id === id);
-  if (box) {
-    tbSyncFloat(id);
-    tbShowFloat(box.el);
-  }
+  if (!box) return;
+  // Sync float bar to this box's current computed style
+  const ce = box.contentEl;
+  const cs = window.getComputedStyle(ce);
+  const ff = tbFFont(), fs = tbFSize(), fc = tbFClr(), fb2 = tbFBold(), fi = tbFItal();
+  if (ff) ff.value = cs.fontFamily.replace(/['"]/g, '').split(',')[0].trim();
+  if (fs) fs.value = Math.round(parseFloat(cs.fontSize));
+  if (fc) fc.value = rgbToHex(cs.color);
+  if (fb2) fb2.classList.toggle('active', cs.fontWeight === 'bold' || parseInt(cs.fontWeight) >= 700);
+  if (fi)  fi.classList.toggle('active',  cs.fontStyle === 'italic');
+  tbPositionBar(box.el);
+}
+function tbDeselect() {
+  TB.selectedId = null;
+  TB.boxes.forEach(b => b.el.classList.remove('selected'));
+  tbHideBar();
 }
 
+// ── Float bar → apply style to selected box ──────
+function tbApplyFloat() {
+  const box = TB.boxes.find(b => b.id === TB.selectedId);
+  if (!box) return;
+  const s = {
+    font:   tbFFont()?.value || 'Arial',
+    size:   parseInt(tbFSize()?.value) || 16,
+    color:  tbFClr()?.value  || '#000000',
+    bold:   !!tbFBold()?.classList.contains('active'),
+    italic: !!tbFItal()?.classList.contains('active'),
+  };
+  tbApplyStyleToEl(box.contentEl, s);
+}
+
+// Wire float bar events
+['tbFloatFont','tbFloatSize','tbFloatColor'].forEach(id => {
+  $(id)?.addEventListener('input',  tbApplyFloat);
+  $(id)?.addEventListener('change', tbApplyFloat);
+});
+$('tbFloatBold')?.addEventListener('click', () => {
+  $('tbFloatBold').classList.toggle('active'); tbApplyFloat();
+});
+$('tbFloatItalic')?.addEventListener('click', () => {
+  $('tbFloatItalic').classList.toggle('active'); tbApplyFloat();
+});
+$('tbFloatDel')?.addEventListener('click', () => {
+  if (TB.selectedId !== null) tbRemove(TB.selectedId);
+});
+$('tbFloatDup')?.addEventListener('click', () => {
+  const box = TB.boxes.find(b => b.id === TB.selectedId);
+  if (!box) return;
+  const x = parseFloat(box.el.style.left) + 16;
+  const y = parseFloat(box.el.style.top)  + 16;
+  const nb = tbCreate(x, y);
+  nb.contentEl.innerHTML = box.contentEl.innerHTML;
+  // Copy styles
+  const cs = window.getComputedStyle(box.contentEl);
+  nb.contentEl.style.cssText = box.contentEl.style.cssText;
+  tbSelect(nb.id);
+});
+
+// Wire sidebar default buttons
+$('tbDefBold')?.addEventListener('click',   () => $('tbDefBold').classList.toggle('active'));
+$('tbDefItalic')?.addEventListener('click', () => $('tbDefItalic').classList.toggle('active'));
+
+// ── Create a text box ─────────────────────────────
+function tbCreate(xPx, yPx) {
+  const s  = tbDefaultStyle();
+  const id = TB.nextId++;
+
+  // Outer wrapper
+  const box       = document.createElement('div');
+  box.className   = 'inline-textbox';
+  box.dataset.tbid = String(id);
+  box.style.left  = xPx + 'px';
+  box.style.top   = yPx + 'px';
+
+  // Editable content
+  const content = document.createElement('div');
+  content.className       = 'tb-content';
+  content.contentEditable = 'true';
+  content.spellcheck      = false;
+  content.dataset.placeholder = 'Type here…';
+  tbApplyStyleToEl(content, s);
+
+  // ✕ Delete button
+  const del       = document.createElement('button');
+  del.className   = 'tb-delete';
+  del.textContent = '✕';
+  del.title       = 'Delete box';
+  del.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
+  del.addEventListener('click',     e => { e.stopPropagation(); tbRemove(id); });
+
+  // SE resize handle
+  const rz      = document.createElement('div');
+  rz.className  = 'tb-resize-handle';
+  rz.title      = 'Drag to resize';
+
+  box.appendChild(content);
+  box.appendChild(del);
+  box.appendChild(rz);
+  $('textBoxLayer').appendChild(box);
+
+  // ── Drag / resize logic ────────────────────────
+  let dragMode = null, dsx, dsy, dox, doy, dow, doh;
+
+  const startDrag = (mode, e) => {
+    dragMode = mode;
+    dsx = e.clientX; dsy = e.clientY;
+    dox = parseFloat(box.style.left)  || 0;
+    doy = parseFloat(box.style.top)   || 0;
+    dow = box.offsetWidth;
+    doh = box.offsetHeight;
+    e.preventDefault(); e.stopPropagation();
+  };
+
+  box.addEventListener('mousedown', e => {
+    tbSelect(id);
+    // Resize handle
+    if (e.target === rz) { startDrag('resize', e); return; }
+    // Content → don't drag, allow typing
+    if (e.target === content || e.target.closest('.tb-content')) {
+      e.stopPropagation(); return;
+    }
+    // Delete btn → handled separately
+    if (e.target === del) return;
+    // Anything else on the box (border) → move
+    startDrag('move', e);
+  });
+
+  const onMouseMove = e => {
+    if (!dragMode) return;
+    const dx = e.clientX - dsx, dy = e.clientY - dsy;
+    if (dragMode === 'move') {
+      box.style.left = (dox + dx) + 'px';
+      box.style.top  = (doy + dy) + 'px';
+      if (TB.selectedId === id) tbPositionBar(box); // keep toolbar aligned
+    } else {
+      box.style.width  = Math.max(60,  dow + dx) + 'px';
+      box.style.height = Math.max(24, doh + dy) + 'px';
+    }
+  };
+  const onMouseUp = () => { dragMode = null; };
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup',   onMouseUp);
+
+  // Focus → select
+  content.addEventListener('focus', () => tbSelect(id));
+
+  const record = { id, el: box, contentEl: content, page: S.curPage };
+  TB.boxes.push(record);
+  tbUpdateApplyBtn();
+  tbSelect(id);
+  setTimeout(() => { content.focus(); placeCursorAtEnd(content); }, 20);
+  return record;
+}
+
+// ── Helpers ───────────────────────────────────────
+function placeCursorAtEnd(el) {
+  const range = document.createRange();
+  const sel   = window.getSelection();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function rgbToHex(rgb) {
+  const m = rgb.match(/\d+/g);
+  if (!m || m.length < 3) return '#000000';
+  return '#' + m.slice(0,3).map(n => parseInt(n).toString(16).padStart(2,'0')).join('');
+}
+
+// ── Remove / clear ────────────────────────────────
 function tbRemove(id) {
   const idx = TB.boxes.findIndex(b => b.id === id);
   if (idx === -1) return;
   TB.boxes[idx].el.remove();
   TB.boxes.splice(idx, 1);
-  tbHideFloat();
+  if (TB.selectedId === id) tbDeselect();
   tbUpdateApplyBtn();
 }
-
 function tbClearAll() {
   TB.boxes.forEach(b => b.el.remove());
   TB.boxes = [];
-  tbHideFloat();
+  tbDeselect();
   tbUpdateApplyBtn();
 }
-
-// ── Drag to move + resize ──────────────────────────
-function tbMakeDraggable(boxEl, contentEl, resizeEl) {
-  let mode = null;
-  let startX, startY, origX, origY, origW, origH;
-
-  boxEl.addEventListener('mousedown', e => {
-    // Only drag when clicking the drag bar
-    if (!e.target.closest('.tb-drag-bar')) {
-      if (e.target === resizeEl) {
-        mode = 'resize';
-        origW = boxEl.offsetWidth  || 120;
-        origH = boxEl.offsetHeight || 30;
-        startX = e.clientX;
-        startY = e.clientY;
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      return;
-    }
-    mode = 'move';
-    origX = parseInt(boxEl.style.left) || 0;
-    origY = parseInt(boxEl.style.top)  || 0;
-    startX = e.clientX;
-    startY = e.clientY;
-    e.preventDefault();
-    e.stopPropagation();
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!mode) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if (mode === 'move') {
-      boxEl.style.left = (origX + dx) + 'px';
-      boxEl.style.top  = (origY + dy) + 'px';
-    } else {
-      boxEl.style.width  = Math.max(80,  origW + dx) + 'px';
-      boxEl.style.height = Math.max(28, origH + dy) + 'px';
-      contentEl.style.width  = '100%';
-      contentEl.style.height = '100%';
-    }
-  });
-
-  document.addEventListener('mouseup', () => { mode = null; });
+function tbUpdateApplyBtn() {
+  const btn = $('addTextBtn');
+  if (btn) btn.disabled = TB.boxes.length === 0;
 }
 
-// ── Click on textBoxLayer to place text box ────────────
+// ── Click on empty layer → create new box ─────────
 $('textBoxLayer').addEventListener('mousedown', e => {
-  // Only create a new box if clicking on empty layer background
-  if (e.target !== $('textBoxLayer')) return;
   if (!TB.active) return;
-  const layer  = $('textBoxLayer');
-  const rect   = layer.getBoundingClientRect();
-  const xPx    = e.clientX - rect.left;
-  const yPx    = e.clientY - rect.top;
-  tbCreate(xPx, yPx);
+  if (e.target !== $('textBoxLayer')) return; // only empty space
+  const rect = $('textBoxLayer').getBoundingClientRect();
+  tbCreate(e.clientX - rect.left, e.clientY - rect.top);
 });
 
-// Click outside any text box → deselect
+// ── Click outside boxes → deselect ───────────────
 document.addEventListener('mousedown', e => {
+  if (!TB.active) return;
   if (e.target.closest('.inline-textbox')) return;
-  if (e.target.closest('.tb-float-bar'))   return;
-  TB.boxes.forEach(b => b.el.classList.remove('selected'));
-  tbHideFloat();
+  if (e.target.closest('#tbFloatBar'))     return;
+  tbDeselect();
 });
 
-// Keep float bar hidden when switching away from text tool
+// ── Switch tool → exit text mode ─────────────────
 document.querySelectorAll('.tool-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    if (btn.dataset.panel !== 'text') tbHideFloat();
+    if (btn.dataset.panel !== 'text') tbExit();
   });
 });
 
-// Sidebar toolbar changes (legacy — kept for compatibility)
-['textFontFamily','textFontSize','textFontColor'].forEach(id => {
-  $(id)?.addEventListener('input',  () => {
-    floatFont.value  = $('textFontFamily')?.value || floatFont.value;
-    floatSize.value  = $('textFontSize')?.value   || floatSize.value;
-    floatColor.value = $('textFontColor')?.value  || floatColor.value;
-    tbApplyFloat();
-  });
-});
-$('textBoldBtn')?.addEventListener('click', () => {
-  $('textBoldBtn').classList.toggle('active');
-  floatBold.classList.toggle('active', $('textBoldBtn').classList.contains('active'));
-  tbApplyFloat();
-});
-$('textItalicBtn')?.addEventListener('click', () => {
-  $('textItalicBtn').classList.toggle('active');
-  floatItalic.classList.toggle('active', $('textItalicBtn').classList.contains('active'));
-  tbApplyFloat();
-});
-
-// Apply all text boxes to PDF
+// ── Apply all boxes to PDF ────────────────────────
 $('addTextBtn').addEventListener('click', async () => {
   const pages = S.toolPages['text'];
   if (!pages?.length) return;
-  if (!TB.boxes.length) { toast('Add at least one text box.', 'error'); return; }
+  const validBoxes = TB.boxes.filter(b => b.contentEl.innerText.trim().length > 0);
+  if (!validBoxes.length) { toast('Add some text first.', 'error'); return; }
 
-  const canvas  = $('previewCanvas');
-  const wrap    = $('previewWrap');
-  const canvasW = canvas.offsetWidth;
-  const canvasH = canvas.offsetHeight;
+  // Get precise bounding rects for coordinate mapping
+  const canvasRect = $('previewCanvas').getBoundingClientRect();
+  const layerRect  = $('textBoxLayer').getBoundingClientRect();
 
-  // Get the actual PDF page dimensions for current page to compute scale
-  const pg1      = await pages[0].pdfJsDoc.getPage(pages[0].pageNum);
-  const viewport = pg1.getViewport({ scale: 1 });
-  const scaleX   = viewport.width  / canvasW;
-  const scaleY   = viewport.height / canvasH;
+  // Layer origin relative to canvas (accounts for padding)
+  const layerOffX = layerRect.left - canvasRect.left;
+  const layerOffY = layerRect.top  - canvasRect.top;
 
-  for (const box of TB.boxes) {
-    const text = box.contentEl.innerText.trim();
-    if (!text) continue;
-
+  for (const box of validBoxes) {
+    const text    = box.contentEl.innerText.trim();
     const pageIdx = (box.page || 1) - 1;
     if (!pages[pageIdx]) continue;
 
-    // Convert pixel position to PDF coordinates
-    const xPdf = box.xPx * scaleX;
-    const yPdf = box.yPx * scaleY;
+    // Box position in layer space
+    const bx = parseFloat(box.el.style.left) || 0;
+    const by = parseFloat(box.el.style.top)  || 0;
+
+    // Convert to canvas-relative pixels
+    const xCanvas = bx + layerOffX;
+    const yCanvas = by + layerOffY;
+
+    // Get PDF viewport for this page to compute scale
+    const pdfPage  = await pages[pageIdx].pdfJsDoc.getPage(pages[pageIdx].pageNum);
+    const viewport = pdfPage.getViewport({ scale: 1 });
+    const scaleX   = viewport.width  / canvasRect.width;
+    const scaleY   = viewport.height / canvasRect.height;
+
+    // Read live computed style from the content element
+    const cs   = window.getComputedStyle(box.contentEl);
+    const size = Math.round(parseFloat(cs.fontSize) * scaleX);
 
     pages[pageIdx].overlays.push({
       type:   'text',
       text,
-      size:   box.style.size,
-      x:      xPdf,
-      y:      yPdf,
-      color:  box.style.color,
-      font:   box.style.font,
-      bold:   box.style.bold,
-      italic: box.style.italic,
+      size,
+      x:      xCanvas * scaleX,
+      y:      yCanvas * scaleY,
+      color:  rgbToHex(cs.color),
+      font:   cs.fontFamily.replace(/['"]/g,'').split(',')[0].trim(),
+      bold:   cs.fontWeight === 'bold' || parseInt(cs.fontWeight) >= 700,
+      italic: cs.fontStyle === 'italic',
     });
   }
 
   loading(true, 'Building PDF…');
   try {
-    dlBytes(await buildPdf(pages), 'edited.pdf');
-    toast('Text applied & downloaded!', 'success');
+    dlBytes(await buildPdf(pages), 'text-edited.pdf');
+    toast('✓ Text applied & downloaded!', 'success');
     tbClearAll();
   } catch(e) {
-    toast(`Failed: ${e.message}`, 'error');
+    console.error('[TB apply]', e);
+    toast(`Error: ${e.message}`, 'error');
   } finally {
     loading(false);
   }
