@@ -35,6 +35,25 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 
+<!-- Floating text box toolbar (appears above active text box) -->
+<div id="tbFloatBar" class="tb-float-bar hidden">
+  <select id="tbFloatFont" class="tb-float-select">
+    <option value="Arial">Arial</option>
+    <option value="Times New Roman">Times New Roman</option>
+    <option value="Courier New">Courier</option>
+    <option value="Georgia">Georgia</option>
+    <option value="Verdana">Verdana</option>
+  </select>
+  <input type="number" id="tbFloatSize" class="tb-float-size" value="16" min="6" max="200"/>
+  <input type="color"  id="tbFloatColor" class="tb-float-color" value="#000000"/>
+  <button id="tbFloatBold"   class="tb-float-btn" title="Bold"><b>B</b></button>
+  <button id="tbFloatItalic" class="tb-float-btn" title="Italic"><i>I</i></button>
+  <div class="tb-float-sep"></div>
+  <button id="tbFloatDel" class="tb-float-btn tb-float-del" title="Delete">
+    <i class="fa-solid fa-trash"></i>
+  </button>
+</div>
+
 <!-- ═══════════════════════════════════════════════ -->
 <!-- HOME SCREEN                                    -->
 <!-- ═══════════════════════════════════════════════ -->
@@ -372,23 +391,40 @@
       <div id="textFileInfo" class="tool-file-info hidden"></div>
 
       <div id="textControls" class="tool-controls hidden">
-        <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to position text.</p>
-        <div class="form-group"><label>Text</label><textarea id="overlayText" class="input textarea" placeholder="Text to add…"></textarea></div>
-        <div class="form-row">
-          <div class="form-group"><label>Page #</label><input type="number" id="textPage" min="1" value="1" class="input"/></div>
-          <div class="form-group"><label>Font Size</label><input type="number" id="textSize" min="4" max="300" value="24" class="input"/></div>
+        <div class="text-hint-bar">
+          <i class="fa-solid fa-arrow-pointer"></i>
+          Click anywhere on the page to add a text box
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>X</label><input type="number" id="textX" value="50" class="input"/></div>
-          <div class="form-group"><label>Y (from top)</label><input type="number" id="textY" value="50" class="input"/></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Color</label><input type="color" id="textColor" value="#000000" class="input color-input"/></div>
-          <div class="form-group" style="justify-content:flex-end"><label>&nbsp;</label>
-            <button id="textPickBtn" class="btn-secondary pick-btn"><i class="fa-solid fa-crosshairs"></i> Pick on Page</button>
+
+        <!-- Default style toolbar -->
+        <div class="text-toolbar">
+          <div class="form-group">
+            <label>Font</label>
+            <select id="textFontFamily" class="input input-sm">
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Verdana">Verdana</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Size</label>
+            <input type="number" id="textFontSize" min="6" max="200" value="16" class="input input-sm"/>
+          </div>
+          <div class="form-group">
+            <label>Color</label>
+            <input type="color" id="textFontColor" value="#000000" class="input color-input"/>
+          </div>
+          <div class="text-style-btns">
+            <button id="textBoldBtn"   class="text-style-btn" title="Bold"><b>B</b></button>
+            <button id="textItalicBtn" class="text-style-btn" title="Italic"><i>I</i></button>
           </div>
         </div>
-        <button id="addTextBtn" class="btn-action"><i class="fa-solid fa-plus"></i> Add Text to PDF</button>
+
+        <button id="addTextBtn" class="btn-action" disabled>
+          <i class="fa-solid fa-check"></i> Apply Text to PDF
+        </button>
       </div>
     </div>
 
@@ -724,6 +760,7 @@
       <canvas id="previewCanvas" class="hidden"></canvas>
       <canvas id="drawingLayer"  class="drawing-layer hidden"></canvas>
       <canvas id="placementOverlay" class="placement-overlay"></canvas>
+      <div id="textBoxLayer"></div>
     </div>
     <div class="preview-footer" id="previewFooter">
       <button id="downloadBtn" class="download-btn" disabled>

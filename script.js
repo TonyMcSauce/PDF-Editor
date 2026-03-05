@@ -143,6 +143,7 @@ function activatePanel(name) {
   if (name === 'merge') refreshMergePreview();
   if (name === 'annotate' && S.pages.length) enterAnnotateMode(); else exitAnnotateMode();
   if (name === 'redact'   && S.pages.length) enterRedactMode();   else exitRedactMode();
+  if (typeof tbCheckEnter === 'function') tbCheckEnter();
 }
 
 document.querySelectorAll('.tool-btn').forEach(btn => {
@@ -394,7 +395,7 @@ $('placementOverlay').addEventListener('click', e => {
 });
 function setPlaceMode(mode, btnId) {
   S.placeMode = S.placeMode===mode ? null : mode;
-  ['textPickBtn','imgPickBtn','sigPickBtn'].forEach(id => {
+  ['imgPickBtn','sigPickBtn'].forEach(id => {
     const b=$(id); if(!b) return;
     b.classList.remove('active-pick');
     b.innerHTML='<i class="fa-solid fa-crosshairs"></i> Pick on Page';
@@ -408,7 +409,6 @@ function setPlaceMode(mode, btnId) {
     toast('Click on the preview to set position.','info',3000);
   } else { clearPlacementOverlay(); }
 }
-$('textPickBtn').addEventListener('click', () => setPlaceMode('text','textPickBtn'));
 $('imgPickBtn' ).addEventListener('click', () => setPlaceMode('image','imgPickBtn'));
 $('sigPickBtn' ).addEventListener('click', () => setPlaceMode('signature','sigPickBtn'));
 
@@ -713,15 +713,323 @@ $('annotateApplyBtn').addEventListener('click',async()=>{
   toast('Annotations applied!','success');
 });
 
-/* ── TEXT ── */
-$('addTextBtn').addEventListener('click',async()=>{
-  const pages=S.toolPages['text']; if(!pages?.length)return;
-  const text=$('overlayText').value.trim(); if(!text){toast('Enter some text.','error');return;}
-  const pgNum=parseInt($('textPage').value,10);
-  if(pgNum<1||pgNum>pages.length){toast(`Page must be 1–${pages.length}.`,'error');return;}
-  pages[pgNum-1].overlays.push({type:'text',text,size:+$('textSize').value||24,
-    x:parseFloat($('textX').value)||0,y:parseFloat($('textY').value)||0,color:$('textColor').value});
-  await previewMain(pgNum); setPlaceMode(null); toast('Text added!','success');
+/* ══════════════════════════════════════════════════
+   INLINE TEXT BOXES  (Smallpdf-style)
+══════════════════════════════════════════════════ */
+const TB = {
+  boxes:  [],   // { id, el, contentEl, page, xPx, yPx, style }
+  nextId: 1,
+  active: false,
+  selectedId: null,
+};
+
+// ── Float bar refs ─────────────────────────────────
+const floatBar    = $('tbFloatBar');
+const floatFont   = $('tbFloatFont');
+const floatSize   = $('tbFloatSize');
+const floatColor  = $('tbFloatColor');
+const floatBold   = $('tbFloatBold');
+const floatItalic = $('tbFloatItalic');
+const floatDel    = $('tbFloatDel');
+
+function tbEnter() {
+  TB.active = true;
+  $('previewWrap').classList.add('text-mode');
+}
+function tbExit() {
+  TB.active = false;
+  $('previewWrap').classList.remove('text-mode');
+  tbHideFloat();
+}
+function tbCheckEnter() {
+  if (S.activeTool === 'text' && S.toolPages['text']?.length) tbEnter();
+  else tbExit();
+}
+function tbUpdateApplyBtn() {
+  $('addTextBtn').disabled = TB.boxes.length === 0;
+}
+
+// ── Floating toolbar position ──────────────────────
+function tbShowFloat(boxEl) {
+  const rect = boxEl.getBoundingClientRect();
+  const barH = 42;
+  let top = rect.top - barH - 8;
+  if (top < 8) top = rect.bottom + 8;
+  floatBar.style.top  = top + 'px';
+  floatBar.style.left = Math.max(8, rect.left) + 'px';
+  floatBar.classList.remove('hidden');
+}
+function tbHideFloat() {
+  floatBar.classList.add('hidden');
+  TB.selectedId = null;
+}
+
+// ── Sync float bar to a box's style ───────────────
+function tbSyncFloat(id) {
+  const box = TB.boxes.find(b => b.id === id);
+  if (!box) return;
+  floatFont.value  = box.style.font;
+  floatSize.value  = box.style.size;
+  floatColor.value = box.style.color;
+  floatBold.classList.toggle('active',   box.style.bold);
+  floatItalic.classList.toggle('active', box.style.italic);
+}
+
+// ── Apply float bar state to selected box ─────────
+function tbApplyFloat() {
+  const box = TB.boxes.find(b => b.id === TB.selectedId);
+  if (!box) return;
+  box.style.font   = floatFont.value;
+  box.style.size   = parseInt(floatSize.value) || 16;
+  box.style.color  = floatColor.value;
+  box.style.bold   = floatBold.classList.contains('active');
+  box.style.italic = floatItalic.classList.contains('active');
+  const ce = box.contentEl;
+  ce.style.fontFamily = box.style.font;
+  ce.style.fontSize   = box.style.size + 'px';
+  ce.style.color      = box.style.color;
+  ce.style.fontWeight = box.style.bold   ? 'bold'   : 'normal';
+  ce.style.fontStyle  = box.style.italic ? 'italic' : 'normal';
+}
+
+// Float bar events
+floatFont.addEventListener('change',  tbApplyFloat);
+floatSize.addEventListener('input',   tbApplyFloat);
+floatColor.addEventListener('input',  tbApplyFloat);
+floatBold.addEventListener('click',   () => { floatBold.classList.toggle('active');   tbApplyFloat(); });
+floatItalic.addEventListener('click', () => { floatItalic.classList.toggle('active'); tbApplyFloat(); });
+floatDel.addEventListener('click',    () => { if (TB.selectedId) tbRemove(TB.selectedId); });
+
+// ── Create text box ────────────────────────────────
+function tbCreate(xPx, yPx) {
+  const style = {
+    font:   floatFont.value  || 'Arial',
+    size:   parseInt(floatSize.value) || 16,
+    color:  floatColor.value || '#000000',
+    bold:   floatBold.classList.contains('active'),
+    italic: floatItalic.classList.contains('active'),
+  };
+  const id = TB.nextId++;
+
+  const box = document.createElement('div');
+  box.className = 'inline-textbox';
+  box.dataset.tbid = id;
+  box.style.left = xPx + 'px';
+  box.style.top  = yPx + 'px';
+
+  const content = document.createElement('div');
+  content.className = 'tb-content';
+  content.contentEditable = 'true';
+  content.spellcheck = false;
+  content.setAttribute('placeholder', 'Type here…');
+  content.style.fontFamily = style.font;
+  content.style.fontSize   = style.size + 'px';
+  content.style.color      = style.color;
+  content.style.fontWeight = style.bold   ? 'bold'   : 'normal';
+  content.style.fontStyle  = style.italic ? 'italic' : 'normal';
+
+  const del = document.createElement('button');
+  del.className = 'tb-delete';
+  del.innerHTML = '✕';
+  del.addEventListener('click', e => { e.stopPropagation(); tbRemove(id); });
+
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'tb-resize-handle';
+
+  box.appendChild(content);
+  box.appendChild(del);
+  box.appendChild(resizeHandle);
+  $('previewWrap').appendChild(box);
+
+  // Select on focus
+  content.addEventListener('focus', () => {
+    tbSelectBox(id);
+  });
+  content.addEventListener('input', () => {
+    // Reposition float bar as box grows
+    tbShowFloat(box);
+  });
+  // Clicking the box border (not content) also selects
+  box.addEventListener('mousedown', e => {
+    if (e.target === content) return;
+    tbSelectBox(id);
+  });
+
+  tbMakeDraggable(box, content, resizeHandle);
+
+  const record = { id, el: box, contentEl: content, page: S.curPage, xPx, yPx, style };
+  TB.boxes.push(record);
+  tbUpdateApplyBtn();
+
+  // Select and focus immediately
+  tbSelectBox(id);
+  setTimeout(() => content.focus(), 30);
+  return record;
+}
+
+function tbSelectBox(id) {
+  TB.selectedId = id;
+  TB.boxes.forEach(b => b.el.classList.toggle('selected', b.id === id));
+  const box = TB.boxes.find(b => b.id === id);
+  if (box) {
+    tbSyncFloat(id);
+    tbShowFloat(box.el);
+  }
+}
+
+function tbRemove(id) {
+  const idx = TB.boxes.findIndex(b => b.id === id);
+  if (idx === -1) return;
+  TB.boxes[idx].el.remove();
+  TB.boxes.splice(idx, 1);
+  tbHideFloat();
+  tbUpdateApplyBtn();
+}
+
+function tbClearAll() {
+  TB.boxes.forEach(b => b.el.remove());
+  TB.boxes = [];
+  tbHideFloat();
+  tbUpdateApplyBtn();
+}
+
+// ── Drag to move ───────────────────────────────────
+function tbMakeDraggable(boxEl, contentEl, resizeEl) {
+  let mode = null; // 'move' | 'resize'
+  let startX, startY, origX, origY, origW, origH;
+
+  boxEl.addEventListener('mousedown', e => {
+    if (e.target === contentEl || e.target.tagName === 'BUTTON') return;
+    if (e.target === resizeEl) {
+      mode = 'resize';
+      origW = boxEl.offsetWidth;
+      origH = boxEl.offsetHeight;
+    } else {
+      mode = 'move';
+      origX = parseInt(boxEl.style.left) || 0;
+      origY = parseInt(boxEl.style.top)  || 0;
+    }
+    startX = e.clientX; startY = e.clientY;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!mode) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (mode === 'move') {
+      boxEl.style.left = (origX + dx) + 'px';
+      boxEl.style.top  = (origY + dy) + 'px';
+      if (TB.selectedId === parseInt(boxEl.dataset.tbid)) tbShowFloat(boxEl);
+    } else {
+      boxEl.style.width  = Math.max(80,  origW + dx) + 'px';
+      boxEl.style.height = Math.max(30, origH + dy) + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', () => { mode = null; });
+}
+
+// ── Click on preview to place text box ────────────
+$('previewWrap').addEventListener('click', e => {
+  if (!TB.active) return;
+  if (e.target.closest('.inline-textbox')) return;
+  const wrap = $('previewWrap');
+  const rect = wrap.getBoundingClientRect();
+  // Account for scroll offset
+  const scrollTop  = wrap.scrollTop  || 0;
+  const scrollLeft = wrap.scrollLeft || 0;
+  const xPx = e.clientX - rect.left  + scrollLeft;
+  const yPx = e.clientY - rect.top   + scrollTop;
+  tbCreate(xPx, yPx);
+});
+
+// Click outside any text box → deselect
+document.addEventListener('mousedown', e => {
+  if (e.target.closest('.inline-textbox')) return;
+  if (e.target.closest('.tb-float-bar'))   return;
+  TB.boxes.forEach(b => b.el.classList.remove('selected'));
+  tbHideFloat();
+});
+
+// Keep float bar hidden when switching away from text tool
+document.querySelectorAll('.tool-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.panel !== 'text') tbHideFloat();
+  });
+});
+
+// Sidebar toolbar changes (legacy — kept for compatibility)
+['textFontFamily','textFontSize','textFontColor'].forEach(id => {
+  $(id)?.addEventListener('input',  () => {
+    floatFont.value  = $('textFontFamily')?.value || floatFont.value;
+    floatSize.value  = $('textFontSize')?.value   || floatSize.value;
+    floatColor.value = $('textFontColor')?.value  || floatColor.value;
+    tbApplyFloat();
+  });
+});
+$('textBoldBtn')?.addEventListener('click', () => {
+  $('textBoldBtn').classList.toggle('active');
+  floatBold.classList.toggle('active', $('textBoldBtn').classList.contains('active'));
+  tbApplyFloat();
+});
+$('textItalicBtn')?.addEventListener('click', () => {
+  $('textItalicBtn').classList.toggle('active');
+  floatItalic.classList.toggle('active', $('textItalicBtn').classList.contains('active'));
+  tbApplyFloat();
+});
+
+// Apply all text boxes to PDF
+$('addTextBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['text'];
+  if (!pages?.length) return;
+  if (!TB.boxes.length) { toast('Add at least one text box.', 'error'); return; }
+
+  const canvas  = $('previewCanvas');
+  const wrap    = $('previewWrap');
+  const canvasW = canvas.offsetWidth;
+  const canvasH = canvas.offsetHeight;
+
+  // Get the actual PDF page dimensions for current page to compute scale
+  const pg1      = await pages[0].pdfJsDoc.getPage(pages[0].pageNum);
+  const viewport = pg1.getViewport({ scale: 1 });
+  const scaleX   = viewport.width  / canvasW;
+  const scaleY   = viewport.height / canvasH;
+
+  for (const box of TB.boxes) {
+    const text = box.contentEl.innerText.trim();
+    if (!text) continue;
+
+    const pageIdx = (box.page || 1) - 1;
+    if (!pages[pageIdx]) continue;
+
+    // Convert pixel position to PDF coordinates
+    const xPdf = box.xPx * scaleX;
+    const yPdf = box.yPx * scaleY;
+
+    pages[pageIdx].overlays.push({
+      type:   'text',
+      text,
+      size:   box.style.size,
+      x:      xPdf,
+      y:      yPdf,
+      color:  box.style.color,
+      font:   box.style.font,
+      bold:   box.style.bold,
+      italic: box.style.italic,
+    });
+  }
+
+  loading(true, 'Building PDF…');
+  try {
+    dlBytes(await buildPdf(pages), 'edited.pdf');
+    toast('Text applied & downloaded!', 'success');
+    tbClearAll();
+  } catch(e) {
+    toast(`Failed: ${e.message}`, 'error');
+  } finally {
+    loading(false);
+  }
 });
 
 /* ── IMAGE OVERLAY ── */
