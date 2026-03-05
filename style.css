@@ -446,9 +446,9 @@ select.input { cursor:pointer }
   box-shadow:0 2px 8px rgba(79,142,247,.4);
 }
 
-/* textBoxLayer */
+/* textBoxLayer — covers the FULL preview wrap including padding */
 #textBoxLayer {
-  position:absolute; top:20px; left:20px; right:20px; bottom:20px;
+  position:absolute; top:0; left:0; right:0; bottom:0;
   pointer-events:none; z-index:150; overflow:visible;
 }
 #textBoxLayer.active { pointer-events:all; cursor:text }
