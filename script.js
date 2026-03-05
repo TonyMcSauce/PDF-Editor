@@ -806,13 +806,14 @@ floatDel.addEventListener('click',    () => { if (TB.selectedId) tbRemove(TB.sel
 // ── Create text box ────────────────────────────────
 function tbCreate(xPx, yPx) {
   const style = {
-    font:   floatFont.value  || 'Arial',
-    size:   parseInt(floatSize.value) || 16,
-    color:  floatColor.value || '#000000',
-    bold:   floatBold.classList.contains('active'),
-    italic: floatItalic.classList.contains('active'),
+    font:   $('textFontFamily')?.value  || 'Arial',
+    size:   parseInt($('textFontSize')?.value) || 16,
+    color:  $('textFontColor')?.value   || '#000000',
+    bold:   $('txtBold')?.classList.contains('active'),
+    italic: $('txtItalic')?.classList.contains('active'),
   };
   const id = TB.nextId++;
+  const layer = $('textBoxLayer');
 
   const box = document.createElement('div');
   box.className = 'inline-textbox';
@@ -833,40 +834,37 @@ function tbCreate(xPx, yPx) {
 
   const del = document.createElement('button');
   del.className = 'tb-delete';
-  del.innerHTML = '✕';
-  del.addEventListener('click', e => { e.stopPropagation(); tbRemove(id); });
+  del.textContent = '✕';
+  del.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
+  del.addEventListener('click',     e => { e.stopPropagation(); tbRemove(id); });
 
   const resizeHandle = document.createElement('div');
   resizeHandle.className = 'tb-resize-handle';
 
+  const dragBar = document.createElement('div');
+  dragBar.className = 'tb-drag-bar';
+
+  box.appendChild(dragBar);
   box.appendChild(content);
   box.appendChild(del);
   box.appendChild(resizeHandle);
-  $('previewWrap').appendChild(box);
+  layer.appendChild(box);
 
-  // Select on focus
-  content.addEventListener('focus', () => {
-    tbSelectBox(id);
-  });
-  content.addEventListener('input', () => {
-    // Reposition float bar as box grows
-    tbShowFloat(box);
-  });
-  // Clicking the box border (not content) also selects
-  box.addEventListener('mousedown', e => {
-    if (e.target === content) return;
-    tbSelectBox(id);
-  });
-
+  // Drag handle = the box border (not content, not buttons)
   tbMakeDraggable(box, content, resizeHandle);
+
+  // Select when clicking border area
+  box.addEventListener('mousedown', e => {
+    e.stopPropagation(); // prevent layer from firing
+    tbSelectBox(id);
+  });
+  content.addEventListener('focus', () => tbSelectBox(id));
 
   const record = { id, el: box, contentEl: content, page: S.curPage, xPx, yPx, style };
   TB.boxes.push(record);
   tbUpdateApplyBtn();
-
-  // Select and focus immediately
   tbSelectBox(id);
-  setTimeout(() => content.focus(), 30);
+  setTimeout(() => content.focus(), 20);
   return record;
 }
 
@@ -896,24 +894,32 @@ function tbClearAll() {
   tbUpdateApplyBtn();
 }
 
-// ── Drag to move ───────────────────────────────────
+// ── Drag to move + resize ──────────────────────────
 function tbMakeDraggable(boxEl, contentEl, resizeEl) {
-  let mode = null; // 'move' | 'resize'
+  let mode = null;
   let startX, startY, origX, origY, origW, origH;
 
   boxEl.addEventListener('mousedown', e => {
-    if (e.target === contentEl || e.target.tagName === 'BUTTON') return;
-    if (e.target === resizeEl) {
-      mode = 'resize';
-      origW = boxEl.offsetWidth;
-      origH = boxEl.offsetHeight;
-    } else {
-      mode = 'move';
-      origX = parseInt(boxEl.style.left) || 0;
-      origY = parseInt(boxEl.style.top)  || 0;
+    // Only drag when clicking the drag bar
+    if (!e.target.closest('.tb-drag-bar')) {
+      if (e.target === resizeEl) {
+        mode = 'resize';
+        origW = boxEl.offsetWidth  || 120;
+        origH = boxEl.offsetHeight || 30;
+        startX = e.clientX;
+        startY = e.clientY;
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
     }
-    startX = e.clientX; startY = e.clientY;
+    mode = 'move';
+    origX = parseInt(boxEl.style.left) || 0;
+    origY = parseInt(boxEl.style.top)  || 0;
+    startX = e.clientX;
+    startY = e.clientY;
     e.preventDefault();
+    e.stopPropagation();
   });
 
   document.addEventListener('mousemove', e => {
@@ -923,10 +929,11 @@ function tbMakeDraggable(boxEl, contentEl, resizeEl) {
     if (mode === 'move') {
       boxEl.style.left = (origX + dx) + 'px';
       boxEl.style.top  = (origY + dy) + 'px';
-      if (TB.selectedId === parseInt(boxEl.dataset.tbid)) tbShowFloat(boxEl);
     } else {
       boxEl.style.width  = Math.max(80,  origW + dx) + 'px';
-      boxEl.style.height = Math.max(30, origH + dy) + 'px';
+      boxEl.style.height = Math.max(28, origH + dy) + 'px';
+      contentEl.style.width  = '100%';
+      contentEl.style.height = '100%';
     }
   });
 
@@ -934,11 +941,12 @@ function tbMakeDraggable(boxEl, contentEl, resizeEl) {
 }
 
 // ── Click on textBoxLayer to place text box ────────────
-$('textBoxLayer').addEventListener('click', e => {
+$('textBoxLayer').addEventListener('mousedown', e => {
+  // Only create a new box if clicking on empty layer background
+  if (e.target !== $('textBoxLayer')) return;
   if (!TB.active) return;
-  if (e.target.closest('.inline-textbox')) return;
-  const canvas = $('previewCanvas');
-  const rect   = canvas.getBoundingClientRect();
+  const layer  = $('textBoxLayer');
+  const rect   = layer.getBoundingClientRect();
   const xPx    = e.clientX - rect.left;
   const yPx    = e.clientY - rect.top;
   tbCreate(xPx, yPx);

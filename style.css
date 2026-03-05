@@ -455,15 +455,24 @@ select.input { cursor:pointer }
 .tb-content:empty::before {
   content:attr(placeholder); color:#aaa; pointer-events:none;
 }
-.tb-delete {
-  position:absolute; top:-9px; right:-9px;
-  width:18px; height:18px; border-radius:50%;
-  background:#ef4444; color:#fff; border:2px solid #fff; cursor:pointer;
-  font-size:.6rem; display:flex; align-items:center; justify-content:center;
-  opacity:0; transition:opacity var(--tr); z-index:101;
+.tb-drag-bar {
+  height:16px; background:#4f8ef7; border-radius:2px 2px 0 0;
+  cursor:move; display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; user-select:none;
 }
-.inline-textbox:hover .tb-delete,
-.inline-textbox.selected .tb-delete { opacity:1 }
+.tb-drag-bar::after {
+  content:'· · · · ·'; color:rgba(255,255,255,.8); font-size:.55rem; letter-spacing:3px;
+}
+.tb-delete {
+  position:absolute; top:-10px; right:-10px;
+  width:20px; height:20px; border-radius:50%;
+  background:#ef4444; color:#fff; border:2px solid #fff; cursor:pointer;
+  font-size:.65rem; display:flex; align-items:center; justify-content:center;
+  z-index:500; line-height:1; padding:0;
+  box-shadow:0 1px 4px rgba(0,0,0,.4);
+  transition:transform .1s, background .1s;
+}
+.tb-delete:hover { background:#dc2626; transform:scale(1.15) }
 .tb-resize-handle {
   position:absolute; bottom:-5px; right:-5px;
   width:14px; height:14px; background:#4f8ef7;
