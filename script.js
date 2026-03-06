@@ -356,6 +356,8 @@ async function previewMain(pg) {
   $('drawingLayer').width  = cv.width; $('drawingLayer').height  = cv.height;
   $('placementOverlay').width = cv.width; $('placementOverlay').height = cv.height;
   updateNav();
+  // Show only text boxes belonging to this page
+  if (typeof tbSyncToPage === 'function') tbSyncToPage(pg);
 }
 
 function updateNav() {
@@ -996,7 +998,21 @@ function tbClearAll() {
 }
 function tbUpdateApplyBtn() {
   const btn = $('addTextBtn');
-  if (btn) btn.disabled = TB.boxes.length === 0;
+  if (!btn) return;
+  const total = TB.boxes.length;
+  btn.disabled = total === 0;
+  btn.innerHTML = total > 0
+    ? `<i class="fa-solid fa-check"></i> Apply ${total} Text Box${total > 1 ? 'es' : ''} to PDF &amp; Download`
+    : `<i class="fa-solid fa-check"></i> Apply Text to PDF &amp; Download`;
+}
+
+// Show only boxes for current page, hide others
+function tbSyncToPage(pg) {
+  TB.boxes.forEach(b => {
+    const onThisPage = b.page === pg;
+    b.el.style.display = onThisPage ? '' : 'none';
+    if (!onThisPage && TB.selectedId === b.id) tbDeselect();
+  });
 }
 
 // ── Click on empty layer → create new box ─────────
