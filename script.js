@@ -1364,27 +1364,63 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
   $(btnId).addEventListener('click', async () => {
     if (!storedFile) return;
     $(btnId).disabled = true;
-    setStatus('working', `Converting to ${label}… may take 30–60s if server just woke up`);
+
+    // Step 1: ping to wake server (Render free tier sleeps after 15 min)
+    setStatus('working', '⏳ Waking up server…');
+    try {
+      await fetch(`${SERVER_URL}/ping`, { method: 'GET', mode: 'cors', signal: AbortSignal.timeout(20000) });
+    } catch (_) {
+      await new Promise(r => setTimeout(r, 4000));
+    }
+
+    // Step 2: convert — server streams keep-alive spaces then ends with JSON
+    setStatus('working', `⚙ Converting to ${label}… please wait`);
     try {
       const formData = new FormData();
       formData.append('file', storedFile, storedFile.name);
-      const res = await fetch(`${SERVER_URL}${endpoint}`, { method:'POST', body:formData });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error:`Server error ${res.status}` }));
-        throw new Error(err.error || `Server error ${res.status}`);
+
+      let res;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          res = await fetch(`${SERVER_URL}${endpoint}`, {
+            method: 'POST',
+            body:   formData,
+            mode:   'cors',
+            signal: AbortSignal.timeout(180000), // 3 min max
+          });
+          break;
+        } catch (fetchErr) {
+          if (attempt === 2) throw fetchErr;
+          setStatus('working', `Retrying… (attempt ${attempt}/2)`);
+          await new Promise(r => setTimeout(r, 5000));
+        }
       }
-      const blob = await res.blob();
-      const outName = storedFile.name.replace(/\.pdf$/i, '') + '.' + ext;
-      const url = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), { href:url, download:outName });
+
+      // Server always returns 200 with JSON (even on errors), because
+      // it uses chunked streaming — parse the text and trim whitespace/spaces
+      const raw  = await res.text();
+      const json = JSON.parse(raw.trim());
+
+      if (!json.ok) throw new Error(json.error || `Conversion failed`);
+
+      // Decode base64 → Blob → download
+      const byteChars = atob(json.data);
+      const byteArr   = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+      const blob   = new Blob([byteArr], { type: json.mime });
+      const url    = URL.createObjectURL(blob);
+      const a      = Object.assign(document.createElement('a'), { href: url, download: json.filename });
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 15000);
+
       setStatus('done', `✓ Converted successfully — check your downloads`);
       toast(`${label} file downloaded!`, 'success');
-    } catch(err) {
-      console.error(err);
-      const msg = (err.message.includes('fetch') || err.message.includes('Failed to fetch'))
-        ? 'Server is waking up (free tier sleeps). Wait 30s and try again.'
+
+    } catch (err) {
+      console.error('[convert]', err);
+      const isCors = err.name === 'TypeError' || err.message.includes('fetch');
+      const msg = isCors
+        ? 'Connection failed. Click Convert again — server may need another moment.'
         : err.message;
       setStatus('fail', `✗ ${msg}`);
       toast(msg, 'error', 7000);
