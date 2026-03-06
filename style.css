@@ -394,6 +394,18 @@ select.input { cursor:pointer }
   border-radius:var(--r); padding:8px 12px;
   font-size:.78rem; color:var(--accent); margin-bottom:2px;
 }
+.wm-undo-row {
+  display:flex; gap:8px; margin-top:4px;
+}
+.wm-undo-row .btn-secondary { flex:1; justify-content:center }
+.btn-danger-soft {
+  color:var(--danger) !important;
+  border-color:rgba(239,68,68,.3) !important;
+}
+.btn-danger-soft:hover:not(:disabled) {
+  background:rgba(239,68,68,.1) !important;
+  border-color:var(--danger) !important;
+}
 .preview-footer {
   padding:10px 16px; background:var(--surface); border-top:1px solid var(--border); flex-shrink:0;
 }

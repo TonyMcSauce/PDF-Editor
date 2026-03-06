@@ -1297,6 +1297,7 @@ function wmActivate() {
   const wmc = $('wmPreviewCanvas');
   wmc.style.top  = cv.offsetTop  + 'px';
   wmc.style.left = cv.offsetLeft + 'px';
+  wmUpdateUndoBtns();
   wmDrawPreview();
 }
 function wmDeactivate() {
@@ -1321,7 +1322,49 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
   });
 });
 
-// ── Apply watermark to PDF ─────────────────────────
+// ── Update undo/remove button states ──────────────
+function wmUpdateUndoBtns() {
+  const pages   = S.toolPages['watermark'] || [];
+  const hasAny  = pages.some(p => p.overlays.some(o => o.type === 'watermark'));
+  $('wmUndoBtn').disabled  = !hasAny;
+  $('wmClearBtn').disabled = !hasAny;
+}
+
+// ── Undo last watermark (removes most recently applied batch) ──
+$('wmUndoBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['watermark'];
+  if (!pages?.length) return;
+  // Find the last watermark overlay added and remove that entire batch
+  // We track by removing the last watermark from each page simultaneously
+  let removed = false;
+  pages.forEach(p => {
+    // Find last watermark index on this page
+    for (let i = p.overlays.length - 1; i >= 0; i--) {
+      if (p.overlays[i].type === 'watermark') {
+        p.overlays.splice(i, 1);
+        removed = true;
+        break; // only remove last one per page
+      }
+    }
+  });
+  if (removed) {
+    await previewMain(S.curPage);
+    wmUpdateUndoBtns();
+    toast('Last watermark removed.', 'success');
+  }
+});
+
+// ── Remove ALL watermarks from all pages ───────────
+$('wmClearBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['watermark'];
+  if (!pages?.length) return;
+  pages.forEach(p => {
+    p.overlays = p.overlays.filter(o => o.type !== 'watermark');
+  });
+  await previewMain(S.curPage);
+  wmUpdateUndoBtns();
+  toast('All watermarks removed.', 'success');
+});
 $('wmBtn').addEventListener('click', async () => {
   const pages = S.toolPages['watermark'];
   if (!pages?.length) return;
@@ -1355,6 +1398,7 @@ $('wmBtn').addEventListener('click', async () => {
 
   await previewMain(S.curPage);
   loading(false);
+  wmUpdateUndoBtns();
   toast('Watermark applied!', 'success');
 });
 
