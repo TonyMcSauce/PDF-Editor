@@ -640,14 +640,25 @@
       <div id="redactFileInfo" class="tool-file-info hidden"></div>
 
       <div id="redactControls" class="tool-controls hidden">
-        <p class="panel-desc">Click and drag on the preview to draw black redaction boxes.</p>
-        <div class="form-group"><label>Page</label><input type="number" id="redactPage" min="1" value="1" class="input"/></div>
-        <div class="annotate-actions">
-          <button id="redactUndoBtn"  class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Undo</button>
-          <button id="redactClearBtn" class="btn-secondary"><i class="fa-solid fa-trash"></i> Clear</button>
-          <button id="redactApplyBtn" class="btn-action"><i class="fa-solid fa-check"></i> Apply Redactions</button>
+        <div class="wm-hint">
+          <i class="fa-solid fa-hand-pointer"></i>
+          Click &amp; drag on the preview to draw redaction boxes
         </div>
-        <p class="hint mt" style="color:var(--danger)"><i class="fa-solid fa-triangle-exclamation"></i> Redactions are permanent.</p>
+        <div class="redact-color-row">
+          <label>Redaction color</label>
+          <div class="redact-color-opts">
+            <button class="rdclr active" data-color="#000000" style="background:#000000" title="Black"></button>
+            <button class="rdclr" data-color="#1a1a2e" style="background:#1a1a2e" title="Dark Blue"></button>
+            <button class="rdclr" data-color="#7f1d1d" style="background:#7f1d1d" title="Dark Red"></button>
+          </div>
+        </div>
+        <div id="redactBoxList" class="redact-box-list"></div>
+        <div class="annotate-actions">
+          <button id="redactUndoBtn"  class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Undo Last</button>
+          <button id="redactClearBtn" class="btn-secondary btn-danger-soft"><i class="fa-solid fa-trash"></i> Clear All</button>
+        </div>
+        <button id="redactApplyBtn" class="btn-action"><i class="fa-solid fa-check"></i> Apply Redactions</button>
+        <p class="hint mt" style="color:var(--danger)"><i class="fa-solid fa-triangle-exclamation"></i> Redactions are permanent once applied.</p>
       </div>
     </div>
 
@@ -821,6 +832,7 @@
       <canvas id="wmPreviewCanvas" class="wm-preview-canvas"></canvas>
       <div id="textBoxLayer"></div>
       <div id="sigPlacementLayer"></div>
+      <div id="redactLayer"></div>
     </div>
     <div class="preview-footer" id="previewFooter">
       <button id="downloadBtn" class="download-btn" disabled>

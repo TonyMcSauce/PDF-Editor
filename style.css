@@ -387,6 +387,40 @@ select.input { cursor:pointer }
 }
 .wm-preview-canvas.active { display:block; pointer-events:all; cursor:move }
 
+/* Redact overlay layer — div-based, no canvas offset issues */
+#redactLayer {
+  position:absolute; pointer-events:none; z-index:170; overflow:visible;
+}
+#redactLayer.active { pointer-events:all; cursor:crosshair; }
+.rdbox {
+  position:absolute; border:2px solid rgba(255,80,80,.8);
+  background:rgba(0,0,0,.82); border-radius:2px; cursor:default;
+  box-sizing:border-box;
+}
+.rdbox .rdx {
+  position:absolute; top:-10px; right:-10px;
+  width:20px; height:20px; border-radius:50%;
+  background:#ef4444; color:#fff; border:none;
+  font-size:11px; cursor:pointer; display:flex;
+  align-items:center; justify-content:center;
+  line-height:1; font-weight:700; z-index:5;
+}
+.rdbox .rdx:hover { background:#dc2626; }
+/* Drag-select rubber band */
+#rdDragBox {
+  position:absolute; border:2px dashed rgba(255,80,80,.9);
+  background:rgba(0,0,0,.35); pointer-events:none; z-index:180;
+  display:none; box-sizing:border-box;
+}
+/* Redact panel extras */
+.redact-color-row { display:flex; align-items:center; gap:10px; margin-bottom:4px; font-size:.8rem; color:var(--muted); }
+.redact-color-opts { display:flex; gap:6px; }
+.rdclr { width:22px; height:22px; border-radius:50%; border:2px solid transparent; cursor:pointer; transition:border-color .15s; }
+.rdclr.active { border-color:#fff; box-shadow:0 0 0 2px var(--accent); }
+.redact-box-list { display:flex; flex-direction:column; gap:4px; max-height:120px; overflow-y:auto; margin-bottom:8px; }
+.rdbox-item { display:flex; align-items:center; justify-content:space-between; padding:5px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; font-size:.75rem; color:var(--muted); }
+.rdbox-item button { background:none; border:none; color:var(--danger); cursor:pointer; font-size:.75rem; }
+
 /* Signature placement layer */
 #sigPlacementLayer {
   position:absolute; pointer-events:none; z-index:160; overflow:visible;
