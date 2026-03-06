@@ -216,6 +216,7 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
         if (toolName === 'split')    updateSplitHint();
         if (toolName === 'text')     tbCheckEnter();
         if (toolName === 'watermark') setTimeout(() => { if (typeof wmActivate==='function') wmActivate(); }, 50);
+        if (toolName === 'signature') setTimeout(() => { if (typeof sigActivate==='function') sigActivate(); }, 50);
       }
       toast(`Loaded "${file.name}" — ${doc.numPages} pages`, 'success');
     } catch (e) { console.error(e); toast(`Load failed: ${e.message}`, 'error'); }
@@ -310,7 +311,7 @@ function drawOverlaysOnCanvas(canvas, overlays, vp) {
         ctx.textBaseline = 'middle';
         ctx.fillText(o.text, 0, 0);
       }
-    } else if (o.type === 'pagenumber') {
+    } else if (o.type === 'pagenumber' || o.type === 'pagenumber_preview') {
       ctx.font = `${o.size * sc}px Arial`; ctx.fillStyle = o.color || '#333';
       ctx.textAlign = o.align || 'center';
       ctx.fillText(o.text, o.x * sc, o.y * sc);
@@ -385,6 +386,13 @@ async function previewMain(pg) {
     wmc.style.top  = cv.offsetTop  + 'px';
     wmc.style.left = cv.offsetLeft + 'px';
     if (typeof wmDrawPreview === 'function') wmDrawPreview();
+
+    // Keep signature placement layer in sync
+    const spl = $('sigPlacementLayer');
+    spl.style.top    = cv.offsetTop  + 'px';
+    spl.style.left   = cv.offsetLeft + 'px';
+    spl.style.width  = cv.offsetWidth  + 'px';
+    spl.style.height = cv.offsetHeight + 'px';
   });
 }
 
@@ -417,7 +425,6 @@ $('placementOverlay').addEventListener('click', e => {
   const px = Math.round(cx/sc), py = Math.round(cy/sc);
   if (S.placeMode==='text')      { $('textX').value=px; $('textY').value=py; }
   if (S.placeMode==='image')     { $('imgX').value=px;  $('imgY').value=py; }
-  if (S.placeMode==='signature') { $('sigX').value=px;  $('sigY').value=py; }
   const ctx = ov.getContext('2d');
   ctx.clearRect(0,0,ov.width,ov.height);
   ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
@@ -430,7 +437,7 @@ $('placementOverlay').addEventListener('click', e => {
 });
 function setPlaceMode(mode, btnId) {
   S.placeMode = S.placeMode===mode ? null : mode;
-  ['imgPickBtn','sigPickBtn'].forEach(id => {
+  ['imgPickBtn'].forEach(id => {
     const b=$(id); if(!b) return;
     b.classList.remove('active-pick');
     b.innerHTML='<i class="fa-solid fa-crosshairs"></i> Pick on Page';
@@ -444,8 +451,7 @@ function setPlaceMode(mode, btnId) {
     toast('Click on the preview to set position.','info',3000);
   } else { clearPlacementOverlay(); }
 }
-$('imgPickBtn' ).addEventListener('click', () => setPlaceMode('image','imgPickBtn'));
-$('sigPickBtn' ).addEventListener('click', () => setPlaceMode('signature','sigPickBtn'));
+$('imgPickBtn').addEventListener('click', () => setPlaceMode('image','imgPickBtn'));
 
 /* ── BUILD PDF ── */
 async function buildPdf(pageDescs, quality = 0.92) {
@@ -664,7 +670,11 @@ async function renderGrid() {
       const p=S.toolPages['pages'];
       const m=p.splice(ev.oldIndex,1)[0]; p.splice(ev.newIndex,0,m);
       grid.querySelectorAll('.page-thumb').forEach((el,i)=>{el.dataset.idx=i;el.querySelector('.page-thumb-label').textContent=`Page ${i+1}`;});
-      S.selectedPgs.clear(); toast('Reordered. Download to save.','info');
+      S.selectedPgs.clear();
+      // Update preview to show new page order
+      const newCur = Math.min(S.curPage, p.length);
+      previewMain(newCur);
+      toast('Reordered. Download to save.','info');
     }});
   } finally { loading(false); }
   updateGridBtns();
@@ -702,8 +712,10 @@ document.querySelectorAll('.annotate-tool-btn').forEach(btn=>{
 });
 const dl=$('drawingLayer');
 function getDrawPos(e){
-  const rect=dl.getBoundingClientRect(),src=e.touches?e.touches[0]:e;
-  return{x:(src.clientX-rect.left)*(dl.width/rect.width),y:(src.clientY-rect.top)*(dl.height/rect.height)};
+  // Always measure against previewCanvas, not drawingLayer, to avoid CSS offset issues
+  const cv=document.getElementById('previewCanvas');
+  const rect=cv.getBoundingClientRect(),src=e.touches?e.touches[0]:e;
+  return{x:(src.clientX-rect.left)*(cv.width/rect.width),y:(src.clientY-rect.top)*(cv.height/rect.height)};
 }
 function enterAnnotateMode(){
   show(dl); dl.classList.add('active');
@@ -1376,57 +1388,117 @@ $('wmBtn').addEventListener('click', async () => {
   if (isImg && !desc.imgEl) { toast('Select a watermark image.', 'error'); return; }
   if (!isImg && !desc.text.trim()) { toast('Enter watermark text.', 'error'); return; }
 
-  // Convert fractional position to PDF coordinate space
-  const cv = $('previewCanvas');
   const pdfPage  = await pages[0].pdfJsDoc.getPage(pages[0].pageNum);
   const viewport = pdfPage.getViewport({ scale: 1 });
   const xPdf = WM.xFrac * viewport.width;
   const yPdf = WM.yFrac * viewport.height;
 
   loading(true, 'Applying watermark…');
-
-  pages.forEach((p, i) => {
-    const n = i + 1;
-    const match = filter === 'all'
-      || (filter === 'odd'   && n % 2 !== 0)
-      || (filter === 'even'  && n % 2 === 0)
-      || (filter === 'first' && n === 1);
-    if (match) {
-      p.overlays.push({ ...desc, xFrac: WM.xFrac, yFrac: WM.yFrac, xPdf, yPdf });
-    }
-  });
-
-  await previewMain(S.curPage);
-  loading(false);
-  wmUpdateUndoBtns();
-  toast('Watermark applied!', 'success');
+  try {
+    pages.forEach((p, i) => {
+      const n = i + 1;
+      const match = filter === 'all'
+        || (filter === 'odd'   && n % 2 !== 0)
+        || (filter === 'even'  && n % 2 === 0)
+        || (filter === 'first' && n === 1);
+      if (match) {
+        p.overlays.push({ ...desc, xFrac: WM.xFrac, yFrac: WM.yFrac, xPdf, yPdf });
+      }
+    });
+    await previewMain(S.curPage);
+    wmUpdateUndoBtns();
+    toast('Watermark applied!', 'success');
+  } finally {
+    loading(false);
+  }
 });
 
 /* ── PAGE NUMBERS ── */
-$('pnBtn').addEventListener('click',async()=>{
-  const pages=S.toolPages['pagenumbers']; if(!pages?.length)return;
-  const pos=$('pnPosition').value,start=parseInt($('pnStart').value,10)||1;
-  const size=+$('pnSize').value||14,color=$('pnColor').value,fmt=$('pnFormat').value;
-  const total=pages.length;
-  loading(true,'Adding page numbers…');
-  const jobs=pages.map(async(p,i)=>{
-    const n=i+start;
-    const text=fmt==='n'?`${n}`:fmt==='of'?`${n} of ${total}`:fmt==='dash'?`— ${n} —`:`Page ${n}`;
-    const pg=await p.pdfJsDoc.getPage(p.pageNum);
-    const rot=(pg.getViewport({scale:1}).rotation+p.rotation)%360;
-    const vp=pg.getViewport({scale:1,rotation:rot});
-    const W=vp.width,H=vp.height,pad=20;
-    let x,y,align='center';
-    if(pos==='bottom-center'){x=W/2;y=H-pad;align='center';}
-    else if(pos==='bottom-right'){x=W-pad;y=H-pad;align='right';}
-    else if(pos==='bottom-left'){x=pad;y=H-pad;align='left';}
-    else if(pos==='top-center'){x=W/2;y=pad+size;align='center';}
-    else if(pos==='top-right'){x=W-pad;y=pad+size;align='right';}
-    else{x=pad;y=pad+size;align='left';}
-    p.overlays.push({type:'pagenumber',text,size,color,x,y,align});
+// Live preview helper — computes overlay for given page index
+async function pnMakeOverlay(pages, i) {
+  const pos   = $('pnPosition').value;
+  const start = parseInt($('pnStart').value, 10) || 1;
+  const size  = +$('pnSize').value || 14;
+  const color = $('pnColor').value;
+  const fmt   = $('pnFormat').value;
+  const total = pages.length;
+  const n     = i + start;
+  const text  = fmt==='n' ? `${n}` : fmt==='of' ? `${n} of ${total}` : fmt==='dash' ? `— ${n} —` : `Page ${n}`;
+  const pg    = await pages[i].pdfJsDoc.getPage(pages[i].pageNum);
+  const rot   = (pg.getViewport({scale:1}).rotation + pages[i].rotation) % 360;
+  const vp    = pg.getViewport({scale:1, rotation:rot});
+  const W = vp.width, H = vp.height, pad = 20;
+  let x, y, align = 'center';
+  if      (pos==='bottom-center') { x=W/2;   y=H-pad;      align='center'; }
+  else if (pos==='bottom-right')  { x=W-pad; y=H-pad;      align='right';  }
+  else if (pos==='bottom-left')   { x=pad;   y=H-pad;      align='left';   }
+  else if (pos==='top-center')    { x=W/2;   y=pad+size;   align='center'; }
+  else if (pos==='top-right')     { x=W-pad; y=pad+size;   align='right';  }
+  else                            { x=pad;   y=pad+size;   align='left';   }
+  return { type:'pagenumber', text, size, color, x, y, align };
+}
+
+// Preview: apply temp overlay to current page and re-render (don't save)
+async function pnPreview() {
+  const pages = S.toolPages['pagenumbers'];
+  if (!pages?.length) return;
+  const idx = S.curPage - 1;
+  // Remove any existing preview overlay, add fresh one
+  pages[idx].overlays = pages[idx].overlays.filter(o => o.type !== 'pagenumber_preview');
+  const o = await pnMakeOverlay(pages, idx);
+  o.type = 'pagenumber_preview'; // mark as preview — not saved
+  pages[idx].overlays.push(o);
+  await previewMain(S.curPage);
+  // Clean up preview overlay (it's just for display, removed on next render)
+  pages[idx].overlays = pages[idx].overlays.filter(o => o.type !== 'pagenumber_preview');
+}
+
+// Wire all pn inputs to trigger live preview
+['pnPosition','pnStart','pnSize','pnColor','pnFormat'].forEach(id => {
+  $(id)?.addEventListener('input',  pnPreview);
+  $(id)?.addEventListener('change', pnPreview);
+});
+
+function pnUpdateUndoBtn() {
+  const pages  = S.toolPages['pagenumbers'] || [];
+  const hasAny = pages.some(p => p.overlays.some(o => o.type === 'pagenumber'));
+  $('pnUndoBtn').disabled  = !hasAny;
+  $('pnClearBtn').disabled = !hasAny;
+}
+
+$('pnBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['pagenumbers']; if (!pages?.length) return;
+  loading(true, 'Adding page numbers…');
+  try {
+    const jobs = pages.map(async (p, i) => {
+      const o = await pnMakeOverlay(pages, i);
+      p.overlays.push(o);
+    });
+    await Promise.all(jobs);
+    await previewMain(S.curPage);
+    pnUpdateUndoBtn();
+    toast('Page numbers added!', 'success');
+  } finally { loading(false); }
+});
+
+$('pnUndoBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['pagenumbers']; if (!pages?.length) return;
+  pages.forEach(p => {
+    for (let i = p.overlays.length - 1; i >= 0; i--) {
+      if (p.overlays[i].type === 'pagenumber') { p.overlays.splice(i, 1); break; }
+    }
   });
-  await Promise.all(jobs);
-  await previewMain(S.curPage); loading(false); toast('Page numbers added!','success');
+  await previewMain(S.curPage);
+  pnUpdateUndoBtn();
+  toast('Last page numbers removed.', 'success');
+});
+
+$('pnClearBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['pagenumbers']; if (!pages?.length) return;
+  pages.forEach(p => { p.overlays = p.overlays.filter(o => o.type !== 'pagenumber'); });
+  await previewMain(S.curPage);
+  pnUpdateUndoBtn();
+  toast('All page numbers removed.', 'success');
 });
 
 /* ── REDACT ── */
@@ -1481,42 +1553,243 @@ $('redactApplyBtn').addEventListener('click',async()=>{
 });
 
 /* ── SIGNATURE ── */
-const sigCv=$('sigCanvas'), sigCtx=sigCv.getContext('2d');
-$('clearSig').addEventListener('click',()=>sigCtx.clearRect(0,0,sigCv.width,sigCv.height));
-function sigPos(e){const r=sigCv.getBoundingClientRect(),s=e.touches?e.touches[0]:e;return{x:(s.clientX-r.left)*(sigCv.width/r.width),y:(s.clientY-r.top)*(sigCv.height/r.height)};}
-function sigDraw(e){e.preventDefault();if(!S.sigDrawing)return;const p=sigPos(e);sigCtx.strokeStyle=$('sigColor').value;sigCtx.lineWidth=+$('sigStroke').value;sigCtx.lineCap='round';sigCtx.lineJoin='round';sigCtx.lineTo(p.x,p.y);sigCtx.stroke();}
-sigCv.addEventListener('mousedown',e=>{e.preventDefault();S.sigDrawing=true;const p=sigPos(e);sigCtx.beginPath();sigCtx.moveTo(p.x,p.y);});
-sigCv.addEventListener('mousemove',e=>sigDraw(e));
-sigCv.addEventListener('mouseup',()=>{S.sigDrawing=false;});
-sigCv.addEventListener('mouseleave',()=>{S.sigDrawing=false;});
-sigCv.addEventListener('touchstart',e=>{e.preventDefault();S.sigDrawing=true;const p=sigPos(e);sigCtx.beginPath();sigCtx.moveTo(p.x,p.y);},{passive:false});
-sigCv.addEventListener('touchmove',e=>sigDraw(e),{passive:false});
-sigCv.addEventListener('touchend',()=>{S.sigDrawing=false;});
-$('addSigBtn').addEventListener('click',async()=>{
-  const pages=S.toolPages['signature']; if(!pages?.length)return;
-  const px=sigCtx.getImageData(0,0,sigCv.width,sigCv.height);
-  if(!px.data.some(v=>v>0)){toast('Draw a signature first.','error');return;}
-  const pgNum=parseInt($('sigPage').value,10);
-  if(pgNum<1||pgNum>pages.length){toast(`Page must be 1–${pages.length}.`,'error');return;}
-  const img=new Image(); img.src=sigCv.toDataURL('image/png');
-  await new Promise(r=>{img.onload=r;});
-  pages[pgNum-1].overlays.push({type:'signature',imgEl:img,
-    x:parseFloat($('sigX').value)||50,y:parseFloat($('sigY').value)||50,
-    w:parseFloat($('sigW').value)||200,h:parseFloat($('sigH').value)||80});
-  await previewMain(pgNum); setPlaceMode(null); toast('Signature added!','success');
+const sigCv  = $('sigCanvas');
+const sigCtx = sigCv.getContext('2d');
+
+// Signature drawing
+$('clearSig').addEventListener('click', () => sigCtx.clearRect(0, 0, sigCv.width, sigCv.height));
+function sigPos(e) {
+  const r = sigCv.getBoundingClientRect(), s = e.touches ? e.touches[0] : e;
+  return { x: (s.clientX-r.left)*(sigCv.width/r.width), y: (s.clientY-r.top)*(sigCv.height/r.height) };
+}
+function sigDraw(e) {
+  e.preventDefault(); if (!S.sigDrawing) return;
+  const p = sigPos(e);
+  sigCtx.strokeStyle = $('sigColor').value;
+  sigCtx.lineWidth   = +$('sigStroke').value;
+  sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round';
+  sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
+}
+sigCv.addEventListener('mousedown', e => { e.preventDefault(); S.sigDrawing=true; const p=sigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y); });
+sigCv.addEventListener('mousemove', e => sigDraw(e));
+sigCv.addEventListener('mouseup',   () => { S.sigDrawing=false; sigCheckDrawn(); });
+sigCv.addEventListener('mouseleave',() => { S.sigDrawing=false; });
+sigCv.addEventListener('touchstart', e => { e.preventDefault(); S.sigDrawing=true; const p=sigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y); }, {passive:false});
+sigCv.addEventListener('touchmove',  e => sigDraw(e), {passive:false});
+sigCv.addEventListener('touchend',   () => { S.sigDrawing=false; sigCheckDrawn(); });
+
+// State
+const SIG = { boxEl: null, active: false };
+
+function sigCheckDrawn() {
+  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
+  const hasInk = px.data.some(v => v > 0);
+  if (hasInk && SIG.active) sigShowBox();
+}
+
+function sigUpdateBtns() {
+  const pages  = S.toolPages['signature'] || [];
+  const hasAny = pages.some(p => p.overlays.some(o => o.type === 'signature'));
+  $('sigUndoBtn').disabled  = !hasAny;
+  $('sigClearBtn').disabled = !hasAny;
+}
+
+// Show/create the draggable signature box on the preview
+function sigShowBox() {
+  const layer = $('sigPlacementLayer');
+  layer.innerHTML = '';
+
+  const box = document.createElement('div');
+  box.className = 'sig-box';
+
+  // Show signature preview inside box
+  const img   = document.createElement('img');
+  img.src     = sigCv.toDataURL('image/png');
+  box.appendChild(img);
+
+  // Resize handle
+  const resH = document.createElement('div');
+  resH.className = 'sig-resize';
+  box.appendChild(resH);
+
+  // Initial position/size
+  const cv = $('previewCanvas');
+  box.style.left   = Math.round(cv.offsetWidth  * 0.05) + 'px';
+  box.style.top    = Math.round(cv.offsetHeight * 0.75) + 'px';
+  box.style.width  = Math.round(cv.offsetWidth  * 0.35) + 'px';
+  box.style.height = Math.round(cv.offsetHeight * 0.12) + 'px';
+
+  // Drag to move
+  let dragMode = null, startX, startY, startL, startT, startW, startH;
+  box.addEventListener('mousedown', e => {
+    if (e.target === resH) {
+      dragMode = 'resize';
+    } else {
+      dragMode = 'move';
+    }
+    startX = e.clientX; startY = e.clientY;
+    startL = parseInt(box.style.left); startT = parseInt(box.style.top);
+    startW = box.offsetWidth; startH = box.offsetHeight;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragMode) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (dragMode === 'move') {
+      box.style.left = Math.max(0, startL + dx) + 'px';
+      box.style.top  = Math.max(0, startT + dy) + 'px';
+    } else {
+      box.style.width  = Math.max(60, startW + dx) + 'px';
+      box.style.height = Math.max(30, startH + dy) + 'px';
+    }
+  });
+  document.addEventListener('mouseup', () => { dragMode = null; });
+
+  layer.appendChild(box);
+  SIG.boxEl = box;
+  $('addSigBtn').disabled = false;
+}
+
+function sigActivate() {
+  SIG.active = true;
+  const layer = $('sigPlacementLayer');
+  const cv = $('previewCanvas');
+  // Position layer over canvas
+  layer.style.top    = cv.offsetTop  + 'px';
+  layer.style.left   = cv.offsetLeft + 'px';
+  layer.style.width  = cv.offsetWidth  + 'px';
+  layer.style.height = cv.offsetHeight + 'px';
+  layer.classList.add('active');
+  sigUpdateBtns();
+  // Show box immediately if signature already drawn
+  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
+  if (px.data.some(v => v > 0)) sigShowBox();
+}
+
+function sigDeactivate() {
+  SIG.active = false;
+  SIG.boxEl  = null;
+  $('sigPlacementLayer').classList.remove('active');
+  $('sigPlacementLayer').innerHTML = '';
+  $('addSigBtn').disabled = true;
+}
+
+// Hook into tool switching
+document.querySelectorAll('.tool-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.panel === 'signature') {
+      setTimeout(() => { if (S.toolPages['signature']?.length) sigActivate(); }, 50);
+    } else {
+      sigDeactivate();
+    }
+  });
+});
+
+// Hook PDF load
+const _origWirePdfSig = wirePdfUpload;
+(function() {
+  const obs = new MutationObserver(() => {
+    if (!$('signatureControls').classList.contains('hidden') && S.activeTool === 'signature' && !SIG.active) {
+      sigActivate();
+    }
+  });
+  obs.observe($('signatureControls'), { attributes:true, attributeFilter:['class'] });
+})();
+
+// Re-sync layer position on page change
+const _sigPreviewHook = previewMain;
+
+// Embed signature button
+$('addSigBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['signature']; if (!pages?.length) return;
+  if (!SIG.boxEl) { toast('Place your signature on the page first.', 'error'); return; }
+
+  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
+  if (!px.data.some(v => v > 0)) { toast('Draw a signature first.', 'error'); return; }
+
+  // Convert box position to PDF coordinates
+  const cv      = $('previewCanvas');
+  const layer   = $('sigPlacementLayer');
+  const bx      = parseFloat(SIG.boxEl.style.left) || 0;
+  const by      = parseFloat(SIG.boxEl.style.top)  || 0;
+  const bw      = SIG.boxEl.offsetWidth;
+  const bh      = SIG.boxEl.offsetHeight;
+  const scaleX  = cv.offsetWidth;
+  const scaleY  = cv.offsetHeight;
+
+  const pdfPage = await pages[S.curPage-1].pdfJsDoc.getPage(pages[S.curPage-1].pageNum);
+  const vp      = pdfPage.getViewport({ scale:1 });
+  const xPdf = (bx / scaleX) * vp.width;
+  const yPdf = (by / scaleY) * vp.height;
+  const wPdf = (bw / scaleX) * vp.width;
+  const hPdf = (bh / scaleY) * vp.height;
+
+  const img = new Image(); img.src = sigCv.toDataURL('image/png');
+  await new Promise(r => { img.onload = r; });
+
+  pages[S.curPage-1].overlays.push({ type:'signature', imgEl:img, x:xPdf, y:yPdf, w:wPdf, h:hPdf });
+  await previewMain(S.curPage);
+  sigUpdateBtns();
+  toast('Signature embedded!', 'success');
+});
+
+// Undo / Clear
+$('sigUndoBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['signature']; if (!pages?.length) return;
+  for (let i = pages[S.curPage-1].overlays.length-1; i >= 0; i--) {
+    if (pages[S.curPage-1].overlays[i].type === 'signature') {
+      pages[S.curPage-1].overlays.splice(i, 1); break;
+    }
+  }
+  await previewMain(S.curPage);
+  sigUpdateBtns();
+  toast('Signature removed.', 'success');
+});
+$('sigClearBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['signature']; if (!pages?.length) return;
+  pages.forEach(p => { p.overlays = p.overlays.filter(o => o.type !== 'signature'); });
+  await previewMain(S.curPage);
+  sigUpdateBtns();
+  toast('All signatures removed.', 'success');
 });
 
 /* ── SECURITY ── */
-$('applyPwdBtn').addEventListener('click',async()=>{
-  const pages=S.toolPages['security']; if(!pages?.length)return;
-  const up=$('userPassword').value; if(!up){toast('Enter a user password.','error');return;}
-  loading(true,'Building PDF…');
-  try{
-    dlBytes(await buildPdf(pages),'document.pdf');
-    const op=$('ownerPassword').value||up;
-    toast(`Saved. Encrypt with: qpdf --encrypt ${up} ${op} 256 -- document.pdf encrypted.pdf`,'info',10000);
-  }catch(e){console.error(e);toast(`Failed: ${e.message}`,'error');}
-  finally{loading(false);}
+$('applyPwdBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['security']; if (!pages?.length) return;
+  const userPwd  = $('userPassword').value.trim();
+  const ownerPwd = $('ownerPassword').value.trim() || userPwd;
+  if (!userPwd) { toast('Enter a password first.', 'error'); return; }
+  loading(true, 'Encrypting PDF…');
+  try {
+    // Build the PDF bytes first
+    const pdfBytes = await buildPdf(pages);
+
+    // Re-open with pdf-lib and apply encryption
+    const doc = await PDFLib.PDFDocument.load(pdfBytes);
+    await doc.encrypt({
+      userPassword:  userPwd,
+      ownerPassword: ownerPwd,
+      permissions: {
+        printing:         'highResolution',
+        modifying:        false,
+        copying:          false,
+        annotating:       false,
+        fillingForms:     false,
+        contentAccessibility: false,
+        documentAssembly: false,
+      },
+    });
+    const encrypted = await doc.save();
+    dlBytes(encrypted, 'protected.pdf');
+    toast('✓ Password-protected PDF downloaded!', 'success');
+    $('userPassword').value = '';
+    $('ownerPassword').value = '';
+  } catch (e) {
+    console.error(e);
+    toast(`Failed: ${e.message}`, 'error');
+  } finally {
+    loading(false);
+  }
 });
 
 /* ── DOWNLOAD (main button, current tool's pages) ── */

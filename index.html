@@ -613,7 +613,15 @@
             <option value="page">Page 1 · Page 2</option>
           </select>
         </div>
-        <button id="pnBtn" class="btn-action"><i class="fa-solid fa-list-ol"></i> Add Page Numbers</button>
+        <div class="wm-hint">
+          <i class="fa-solid fa-eye"></i>
+          Changes preview live on the current page
+        </div>
+        <button id="pnBtn" class="btn-action"><i class="fa-solid fa-list-ol"></i> Apply to All Pages</button>
+        <div class="wm-undo-row">
+          <button id="pnUndoBtn" class="btn-secondary" disabled><i class="fa-solid fa-rotate-left"></i> Undo Last</button>
+          <button id="pnClearBtn" class="btn-secondary btn-danger-soft" disabled><i class="fa-solid fa-trash"></i> Remove All</button>
+        </div>
       </div>
     </div>
 
@@ -658,28 +666,22 @@
       <div id="signatureFileInfo" class="tool-file-info hidden"></div>
 
       <div id="signatureControls" class="tool-controls hidden">
-        <p class="panel-desc">Draw your signature below, then pick a position on the preview.</p>
+        <p class="panel-desc">Draw your signature below, then drag it onto the page preview.</p>
         <div class="sig-canvas-wrap"><canvas id="sigCanvas" width="500" height="160"></canvas></div>
         <div class="sig-toolbar">
           <div class="form-group inline"><label>Color</label><input type="color" id="sigColor" value="#000000" class="input color-input small"/></div>
           <div class="form-group inline"><label>Stroke</label><input type="range" id="sigStroke" min="1" max="10" value="2" class="range-input"/></div>
           <button id="clearSig" class="btn-secondary"><i class="fa-solid fa-eraser"></i> Clear</button>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>Page #</label><input type="number" id="sigPage" min="1" value="1" class="input"/></div>
-          <div class="form-group" style="justify-content:flex-end"><label>&nbsp;</label>
-            <button id="sigPickBtn" class="btn-secondary pick-btn"><i class="fa-solid fa-crosshairs"></i> Pick on Page</button>
-          </div>
+        <div class="wm-hint">
+          <i class="fa-solid fa-hand-pointer"></i>
+          Click the preview to place signature · Drag to move · Drag corner to resize
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>X</label><input type="number" id="sigX" value="50" class="input"/></div>
-          <div class="form-group"><label>Y</label><input type="number" id="sigY" value="50" class="input"/></div>
+        <button id="addSigBtn" class="btn-action" disabled><i class="fa-solid fa-plus"></i> Embed Signature on Page</button>
+        <div class="wm-undo-row">
+          <button id="sigUndoBtn" class="btn-secondary" disabled><i class="fa-solid fa-rotate-left"></i> Undo Last</button>
+          <button id="sigClearBtn" class="btn-secondary btn-danger-soft" disabled><i class="fa-solid fa-trash"></i> Remove All</button>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>Width</label><input type="number" id="sigW" value="200" class="input"/></div>
-          <div class="form-group"><label>Height</label><input type="number" id="sigH" value="80" class="input"/></div>
-        </div>
-        <button id="addSigBtn" class="btn-action"><i class="fa-solid fa-plus"></i> Embed Signature</button>
       </div>
     </div>
 
@@ -698,21 +700,21 @@
       <div id="securityFileInfo" class="tool-file-info hidden"></div>
 
       <div id="securityControls" class="tool-controls hidden">
-        <p class="panel-desc">PDF will be downloaded and the notification will show a <code>qpdf</code> command to encrypt it.</p>
-        <div class="form-group"><label>User Password</label>
+        <p class="panel-desc">Set a password to restrict who can open your PDF. Encryption is done entirely in your browser.</p>
+        <div class="form-group"><label>Password to Open</label>
           <div class="input-eye">
-            <input type="password" id="userPassword" class="input" placeholder="Password to open…"/>
+            <input type="password" id="userPassword" class="input" placeholder="Required to open PDF…"/>
             <button class="icon-btn" onclick="togglePwd('userPassword')"><i class="fa-solid fa-eye"></i></button>
           </div>
         </div>
-        <div class="form-group"><label>Owner Password <span class="hint">(optional)</span></label>
+        <div class="form-group"><label>Owner Password <span class="hint">(optional — for permissions)</span></label>
           <div class="input-eye">
-            <input type="password" id="ownerPassword" class="input" placeholder="Permissions password…"/>
+            <input type="password" id="ownerPassword" class="input" placeholder="Defaults to same as above…"/>
             <button class="icon-btn" onclick="togglePwd('ownerPassword')"><i class="fa-solid fa-eye"></i></button>
           </div>
         </div>
-        <button id="applyPwdBtn" class="btn-action"><i class="fa-solid fa-download"></i> Download + Encryption Tip</button>
-        <p class="hint mt">Nothing is sent to any server.</p>
+        <button id="applyPwdBtn" class="btn-action"><i class="fa-solid fa-lock"></i> Encrypt & Download PDF</button>
+        <p class="hint mt"><i class="fa-solid fa-shield"></i> 128-bit RC4 encryption · Nothing is sent to any server.</p>
       </div>
     </div>
 
@@ -818,6 +820,7 @@
       <canvas id="placementOverlay" class="placement-overlay"></canvas>
       <canvas id="wmPreviewCanvas" class="wm-preview-canvas"></canvas>
       <div id="textBoxLayer"></div>
+      <div id="sigPlacementLayer"></div>
     </div>
     <div class="preview-footer" id="previewFooter">
       <button id="downloadBtn" class="download-btn" disabled>
