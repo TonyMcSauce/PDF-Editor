@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PDF Studio — Maintenance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #05060f;
+    --surface:  #0c0e1e;
+    --border:   #1a1d35;
+    --accent:   #4f7fff;
+    --accent2:  #8b5cf6;
+    --warn:     #f59e0b;
+    --text:     #e8ecff;
+    --muted:    #5a6080;
+    --dim:      #2e3260;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── Animated starfield background ── */
+  .starfield {
+    position: fixed; inset: 0; z-index: 0;
+    overflow: hidden; pointer-events: none;
+  }
+  .star {
+    position: absolute; border-radius: 50%;
+    background: #fff; opacity: 0;
+    animation: twinkle var(--dur) var(--delay) infinite ease-in-out;
+  }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0; transform: scale(0.5); }
+    50%       { opacity: var(--op); transform: scale(1); }
+  }
+
+  /* ── Glowing orbs ── */
+  .orb {
+    position: fixed; border-radius: 50%;
+    filter: blur(80px); pointer-events: none; z-index: 0;
+    animation: drift 12s ease-in-out infinite alternate;
+  }
+  .orb-1 {
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(79,127,255,.18), transparent 70%);
+    top: -150px; left: -100px;
+    animation-duration: 14s;
+  }
+  .orb-2 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(139,92,246,.15), transparent 70%);
+    bottom: -100px; right: -80px;
+    animation-duration: 10s; animation-delay: -5s;
+  }
+  .orb-3 {
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(245,158,11,.08), transparent 70%);
+    top: 40%; left: 55%;
+    animation-duration: 18s; animation-delay: -8s;
+  }
+  @keyframes drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(30px, 20px) scale(1.08); }
+  }
+
+  /* ── Grid overlay ── */
+  .grid-overlay {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(79,127,255,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,.04) 1px, transparent 1px);
+    background-size: 60px 60px;
+    mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%);
+  }
+
+  /* ── Main layout ── */
+  .container {
+    position: relative; z-index: 10;
+    height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 40px 24px;
+    gap: 0;
+  }
+
+  /* ── Logo ── */
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 52px;
+    animation: fadeDown .8s ease both;
+  }
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; box-shadow: 0 0 24px rgba(79,127,255,.35);
+  }
+  .logo-text {
+    font-size: 1.1rem; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text);
+  }
+  .logo-text span { color: var(--accent); }
+
+  /* ── Status badge ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(245,158,11,.08);
+    border: 1px solid rgba(245,158,11,.25);
+    border-radius: 40px; padding: 6px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: .72rem; color: var(--warn);
+    letter-spacing: .06em; text-transform: uppercase;
+    margin-bottom: 28px;
+    animation: fadeDown .8s .1s ease both;
+  }
+  .badge-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warn);
+    animation: pulse-warn 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse-warn {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,.6); }
+    50%       { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+  }
+
+  /* ── Headline ── */
+  .headline {
+    font-size: clamp(2.8rem, 7vw, 5.5rem);
+    font-weight: 800; line-height: 1.05;
+    text-align: center; letter-spacing: -.02em;
+    margin-bottom: 20px;
+    animation: fadeDown .8s .2s ease both;
+  }
+  .headline .line1 { display: block; color: var(--text); }
+  .headline .line2 {
+    display: block;
+    background: linear-gradient(90deg, var(--accent), var(--accent2) 60%, var(--warn));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Subtext ── */
+  .subtext {
+    font-family: 'DM Mono', monospace;
+    font-size: clamp(.8rem, 1.5vw, .95rem);
+    color: var(--muted); text-align: center;
+    line-height: 1.7; max-width: 460px;
+    margin-bottom: 52px;
+    animation: fadeDown .8s .3s ease both;
+  }
+  .subtext strong { color: var(--text); font-weight: 400; }
+
+  /* ── Progress / activity bar ── */
+  .activity {
+    width: min(440px, 90vw);
+    margin-bottom: 48px;
+    animation: fadeDown .8s .4s ease both;
+  }
+  .activity-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .activity-label {
+    font-family: 'DM Mono', monospace;
+    font-size: .68rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .activity-pct {
+    font-family: 'DM Mono', monospace;
+    font-size: .68rem; color: var(--accent);
+  }
+  .bar-track {
+    height: 4px; background: var(--border); border-radius: 4px; overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 4px;
+    animation: progress 8s ease-in-out infinite alternate;
+    box-shadow: 0 0 10px rgba(79,127,255,.5);
+  }
+  @keyframes progress {
+    0%   { width: 28%; }
+    30%  { width: 55%; }
+    60%  { width: 72%; }
+    100% { width: 91%; }
+  }
+
+  /* ── Steps ── */
+  .steps {
+    display: flex; flex-direction: column; gap: 10px;
+    width: min(440px, 90vw);
+    margin-bottom: 52px;
+    animation: fadeDown .8s .5s ease both;
+  }
+  .step {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 16px;
+    background: rgba(255,255,255,.02);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: .76rem; color: var(--muted);
+    transition: border-color .3s, color .3s;
+  }
+  .step.done   { color: #34d399; border-color: rgba(52,211,153,.2); }
+  .step.active { color: var(--text); border-color: rgba(79,127,255,.3); }
+  .step-icon { font-size: .9rem; flex-shrink: 0; width: 18px; text-align: center; }
+  .step.active .step-icon { animation: spin 2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Bottom row ── */
+  .bottom {
+    display: flex; align-items: center; gap: 24px;
+    animation: fadeDown .8s .6s ease both;
+  }
+  .notify-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 26px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none; border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: .85rem; font-weight: 600;
+    color: #fff; cursor: pointer; letter-spacing: .02em;
+    box-shadow: 0 4px 20px rgba(79,127,255,.3);
+    transition: transform .15s, box-shadow .15s;
+    text-decoration: none;
+  }
+  .notify-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(79,127,255,.45);
+  }
+  .notify-btn:active { transform: translateY(0); }
+
+  .status-link {
+    font-family: 'DM Mono', monospace;
+    font-size: .75rem; color: var(--muted);
+    text-decoration: none; letter-spacing: .04em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1px;
+    transition: color .2s, border-color .2s;
+  }
+  .status-link:hover { color: var(--text); border-color: var(--muted); }
+
+  /* ── Timestamp ── */
+  .timestamp {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    font-family: 'DM Mono', monospace; font-size: .65rem;
+    color: var(--dim); letter-spacing: .06em;
+    z-index: 10; white-space: nowrap;
+    animation: fadeUp .8s .8s ease both;
+  }
+
+  /* ── Animations ── */
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translate(-50%, 14px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  /* ── Scanline effect ── */
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,.03) 2px,
+      rgba(0,0,0,.03) 4px
+    );
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 480px) {
+    .steps, .activity { display: none; }
+    .headline { margin-bottom: 16px; }
+    .subtext  { margin-bottom: 36px; }
+    .bottom   { flex-direction: column; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Starfield -->
+<div class="starfield" id="starfield"></div>
+
+<!-- Glowing orbs -->
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<!-- Grid -->
+<div class="grid-overlay"></div>
+
+<div class="container">
+
+  <!-- Logo -->
+  <div class="logo">
+    <div class="logo-icon">📄</div>
+    <div class="logo-text">PDF <span>Studio</span></div>
+  </div>
+
+  <!-- Status badge -->
+  <div class="badge">
+    <div class="badge-dot"></div>
+    Scheduled Maintenance
+  </div>
+
+  <!-- Headline -->
+  <h1 class="headline">
+    <span class="line1">We'll be back</span>
+    <span class="line2">very soon.</span>
+  </h1>
+
+  <!-- Subtext -->
+  <p class="subtext">
+    PDF Studio is currently undergoing <strong>scheduled maintenance</strong>
+    to improve performance and reliability.
+    We apologise for the inconvenience — this won't take long.
+  </p>
+
+  <!-- Progress bar -->
+  <div class="activity">
+    <div class="activity-header">
+      <span class="activity-label">Repair progress</span>
+      <span class="activity-pct" id="pct">—</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step done"   id="s1"><span class="step-icon">✓</span> Identifying the issue</div>
+    <div class="step done"   id="s2"><span class="step-icon">✓</span> Applying the fix</div>
+    <div class="step active" id="s3"><span class="step-icon">⟳</span> Running final checks</div>
+    <div class="step"        id="s4"><span class="step-icon">○</span> Deploying to production</div>
+  </div>
+
+  <!-- CTA -->
+  <div class="bottom">
+    <a href="mailto:support@pdfstudio.com" class="notify-btn">
+      ✉ &nbsp;Get Notified
+    </a>
+    <a href="https://tonymcsauce.github.io/PDF-Editor/" class="status-link">
+      Try again →
+    </a>
+  </div>
+
+</div>
+
+<!-- Timestamp -->
+<div class="timestamp" id="ts">Last updated: —</div>
+
+<script>
+  // ── Generate starfield ──
+  const sf = document.getElementById('starfield');
+  for (let i = 0; i < 120; i++) {
+    const s = document.createElement('div');
+    s.className = 'star';
+    const size = Math.random() * 2.5 + .5;
+    s.style.cssText = `
+      width:${size}px; height:${size}px;
+      top:${Math.random()*100}%; left:${Math.random()*100}%;
+      --dur:${(Math.random()*4+2).toFixed(1)}s;
+      --delay:-${(Math.random()*6).toFixed(1)}s;
+      --op:${(Math.random()*.6+.1).toFixed(2)};
+    `;
+    sf.appendChild(s);
+  }
+
+  // ── Live percentage from bar animation ──
+  const pctEl   = document.getElementById('pct');
+  const barEl   = document.getElementById('barFill');
+  function readPct() {
+    const w = barEl.getBoundingClientRect().width;
+    const t = barEl.parentElement.getBoundingClientRect().width;
+    if (t > 0) pctEl.textContent = Math.round((w/t)*100) + '%';
+    requestAnimationFrame(readPct);
+  }
+  requestAnimationFrame(readPct);
+
+  // ── Timestamp ──
+  function updateTs() {
+    const now = new Date();
+    document.getElementById('ts').textContent =
+      'Last updated: ' + now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }) +
+      ' · ' + now.toLocaleDateString([], { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+  }
+  updateTs();
+  setInterval(updateTs, 1000);
+
+  // ── Step progression (demo — cycles every 14s) ──
+  const steps  = ['s1','s2','s3','s4'];
+  const labels = [
+    ['✓','Identifying the issue'],
+    ['✓','Applying the fix'],
+    ['⟳','Running final checks'],
+    ['○','Deploying to production'],
+  ];
+  let activeStep = 2;
+  setInterval(() => {
+    activeStep = (activeStep + 1) % steps.length;
+    steps.forEach((id, i) => {
+      const el = document.getElementById(id);
+      el.className = 'step ' + (i < activeStep ? 'done' : i === activeStep ? 'active' : '');
+      el.innerHTML = `<span class="step-icon">${i < activeStep ? '✓' : i === activeStep ? '⟳' : '○'}</span> ${labels[i][1]}`;
+    });
+  }, 14000);
+</script>
+</body>
+</html>
