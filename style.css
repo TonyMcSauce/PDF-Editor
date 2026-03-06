@@ -378,6 +378,22 @@ select.input { cursor:pointer }
 .drawing-layer { position:absolute; top:20px; left:20px; border-radius:var(--r); pointer-events:none }
 .drawing-layer.active { pointer-events:all }
 .placement-overlay { position:absolute; top:20px; left:20px; pointer-events:none; border-radius:var(--r) }
+
+/* Watermark live preview canvas */
+.wm-preview-canvas {
+  position:absolute; top:20px; left:20px;
+  border-radius:var(--r); pointer-events:none;
+  display:none; z-index:120;
+}
+.wm-preview-canvas.active { display:block; pointer-events:all; cursor:move }
+
+/* Watermark hint bar */
+.wm-hint {
+  display:flex; align-items:center; gap:8px;
+  background:rgba(79,142,247,.08); border:1px solid rgba(79,142,247,.2);
+  border-radius:var(--r); padding:8px 12px;
+  font-size:.78rem; color:var(--accent); margin-bottom:2px;
+}
 .preview-footer {
   padding:10px 16px; background:var(--surface); border-top:1px solid var(--border); flex-shrink:0;
 }
