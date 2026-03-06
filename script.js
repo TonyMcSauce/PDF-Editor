@@ -356,8 +356,20 @@ async function previewMain(pg) {
   $('drawingLayer').width  = cv.width; $('drawingLayer').height  = cv.height;
   $('placementOverlay').width = cv.width; $('placementOverlay').height = cv.height;
   updateNav();
-  // Show only text boxes belonging to this page
-  if (typeof tbSyncToPage === 'function') tbSyncToPage(pg);
+
+  // Fit textBoxLayer exactly over the canvas after layout completes
+  requestAnimationFrame(() => {
+    const layer = $('textBoxLayer');
+    const wrap  = $('previewWrap');
+    const wRect = wrap.getBoundingClientRect();
+    const cRect = cv.getBoundingClientRect();
+    // Position relative to the wrap (scrollable container)
+    layer.style.top    = (cRect.top  - wRect.top  + wrap.scrollTop)  + 'px';
+    layer.style.left   = (cRect.left - wRect.left + wrap.scrollLeft) + 'px';
+    layer.style.width  = cRect.width  + 'px';
+    layer.style.height = cRect.height + 'px';
+    if (typeof tbSyncToPage === 'function') tbSyncToPage(pg);
+  });
 }
 
 function updateNav() {
@@ -957,7 +969,13 @@ function tbCreate(xPx, yPx) {
   // Focus → select
   content.addEventListener('focus', () => tbSelect(id));
 
-  const record = { id, el: box, contentEl: content, page: S.curPage };
+  const cv = $('previewCanvas');
+  const record = {
+    id, el: box, contentEl: content,
+    page:    S.curPage,
+    canvasW: cv.offsetWidth,   // display size at creation — used for PDF coord scaling
+    canvasH: cv.offsetHeight,
+  };
   TB.boxes.push(record);
   tbUpdateApplyBtn();
   tbSelect(id);
@@ -1045,34 +1063,25 @@ $('addTextBtn').addEventListener('click', async () => {
   const validBoxes = TB.boxes.filter(b => b.contentEl.innerText.trim().length > 0);
   if (!validBoxes.length) { toast('Add some text first.', 'error'); return; }
 
-  // Get precise bounding rects for coordinate mapping
-  const canvasRect = $('previewCanvas').getBoundingClientRect();
-  const layerRect  = $('textBoxLayer').getBoundingClientRect();
-
-  // Layer origin relative to canvas (accounts for padding)
-  const layerOffX = layerRect.left - canvasRect.left;
-  const layerOffY = layerRect.top  - canvasRect.top;
-
   for (const box of validBoxes) {
     const text    = box.contentEl.innerText.trim();
     const pageIdx = (box.page || 1) - 1;
     if (!pages[pageIdx]) continue;
 
-    // Box position in layer space
+    // box.left/top are canvas-relative pixels (layer == canvas, no offset)
     const bx = parseFloat(box.el.style.left) || 0;
     const by = parseFloat(box.el.style.top)  || 0;
 
-    // Convert to canvas-relative pixels
-    const xCanvas = bx + layerOffX;
-    const yCanvas = by + layerOffY;
+    // Scale from canvas display size → PDF coordinate space
+    // Use the canvas size that was recorded when this box was created
+    const canvasW = box.canvasW;
+    const canvasH = box.canvasH;
 
-    // Get PDF viewport for this page to compute scale
     const pdfPage  = await pages[pageIdx].pdfJsDoc.getPage(pages[pageIdx].pageNum);
     const viewport = pdfPage.getViewport({ scale: 1 });
-    const scaleX   = viewport.width  / canvasRect.width;
-    const scaleY   = viewport.height / canvasRect.height;
+    const scaleX   = viewport.width  / canvasW;
+    const scaleY   = viewport.height / canvasH;
 
-    // Read live computed style from the content element
     const cs   = window.getComputedStyle(box.contentEl);
     const size = Math.round(parseFloat(cs.fontSize) * scaleX);
 
@@ -1080,8 +1089,8 @@ $('addTextBtn').addEventListener('click', async () => {
       type:   'text',
       text,
       size,
-      x:      xCanvas * scaleX,
-      y:      yCanvas * scaleY,
+      x:      bx * scaleX,
+      y:      by * scaleY,
       color:  rgbToHex(cs.color),
       font:   cs.fontFamily.replace(/['"]/g,'').split(',')[0].trim(),
       bold:   cs.fontWeight === 'bold' || parseInt(cs.fontWeight) >= 700,

@@ -446,10 +446,13 @@ select.input { cursor:pointer }
   box-shadow:0 2px 8px rgba(79,142,247,.4);
 }
 
-/* textBoxLayer — covers the FULL preview wrap including padding */
+/* textBoxLayer — sized to canvas, sits directly on top of it, scrolls with it */
 #textBoxLayer {
-  position:absolute; top:0; left:0; right:0; bottom:0;
-  pointer-events:none; z-index:150; overflow:visible;
+  position:absolute;
+  pointer-events:none;
+  z-index:150;
+  overflow:visible;
+  /* top/left/width/height set by JS to match canvas exactly */
 }
 #textBoxLayer.active { pointer-events:all; cursor:text }
 #textBoxLayer .inline-textbox { pointer-events:all }
