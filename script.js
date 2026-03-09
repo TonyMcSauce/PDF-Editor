@@ -1712,7 +1712,12 @@ const sigCv  = $('sigCanvas');
 const sigCtx = sigCv.getContext('2d');
 
 // Signature drawing
-$('clearSig').addEventListener('click', () => sigCtx.clearRect(0, 0, sigCv.width, sigCv.height));
+$('clearSig').addEventListener('click', () => {
+  sigCtx.clearRect(0, 0, sigCv.width, sigCv.height);
+  // Remove placement box too — signature is blank now
+  if (SIG.boxEl) { SIG.boxEl.remove(); SIG.boxEl = null; }
+  $('addSigBtn').disabled = true;
+});
 function sigPos(e) {
   const r = sigCv.getBoundingClientRect(), s = e.touches ? e.touches[0] : e;
   return { x: (s.clientX-r.left)*(sigCv.width/r.width), y: (s.clientY-r.top)*(sigCv.height/r.height) };
@@ -1724,6 +1729,15 @@ function sigDraw(e) {
   sigCtx.lineWidth   = +$('sigStroke').value;
   sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round';
   sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
+  // Auto-show box on first ink; then keep live in sync
+  if (SIG.active) {
+    if (!SIG.boxEl) {
+      sigShowBox(); // place at default position automatically
+    } else {
+      const img = SIG.boxEl.querySelector('img');
+      if (img) img.src = sigCv.toDataURL('image/png');
+    }
+  }
 }
 sigCv.addEventListener('mousedown', e => { e.preventDefault(); S.sigDrawing=true; const p=sigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y); });
 sigCv.addEventListener('mousemove', e => sigDraw(e));
@@ -1737,9 +1751,20 @@ sigCv.addEventListener('touchend',   () => { S.sigDrawing=false; sigCheckDrawn()
 const SIG = { boxEl: null, active: false };
 
 function sigCheckDrawn() {
+  if (!SIG.active) return;
   const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
   const hasInk = px.data.some(v => v > 0);
-  if (hasInk && SIG.active) sigShowBox();
+  if (hasInk) {
+    if (!SIG.boxEl) sigShowBox(); // auto-place if not yet shown
+    else {
+      const img = SIG.boxEl.querySelector('img');
+      if (img) img.src = sigCv.toDataURL('image/png');
+    }
+  } else {
+    // No ink (e.g. after clearSig) — remove box
+    if (SIG.boxEl) { SIG.boxEl.remove(); SIG.boxEl = null; }
+    $('addSigBtn').disabled = true;
+  }
 }
 
 function sigUpdateBtns() {
@@ -1950,200 +1975,58 @@ $('sigClearBtn').addEventListener('click', async () => {
   toast('All signatures removed.', 'success');
 });
 
-/* ── SECURITY — PDF RC4-128 encryption (pure JS, no server) ── */
-
-// Correct MD5 implementation (byte-level padding then word-pack)
-function md5(bytes) {
-  const len = bytes.length;
-  const padLen = ((55 - len % 64) + 64) % 64 + 1;
-  const msg = new Uint8Array(len + padLen + 8);
-  msg.set(bytes); msg[len] = 0x80;
-  const dv = new DataView(msg.buffer);
-  dv.setUint32(len + padLen,     (len * 8) & 0xFFFFFFFF, true);
-  dv.setUint32(len + padLen + 4, Math.floor(len * 8 / 0x100000000), true);
-  const words = new Int32Array(msg.buffer);
-  function safeAdd(x,y){const lsw=(x&0xFFFF)+(y&0xFFFF);return((x>>16)+(y>>16)+(lsw>>16))<<16|lsw&0xFFFF;}
-  function bitRotate(n,c){return n<<c|n>>>32-c;}
-  function cmn(q,a,b,x,s,t){return safeAdd(bitRotate(safeAdd(safeAdd(a,q),safeAdd(x,t)),s),b);}
-  function ff(a,b,c,d,x,s,t){return cmn(b&c|~b&d,a,b,x,s,t);}
-  function gg(a,b,c,d,x,s,t){return cmn(b&d|c&~d,a,b,x,s,t);}
-  function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t);}
-  function ii(a,b,c,d,x,s,t){return cmn(c^(b|~d),a,b,x,s,t);}
-  let a=0x67452301,b=0xEFCDAB89,c=0x98BADCFE,d=0x10325476;
-  for(let i=0;i<words.length;i+=16){
-    const[A,B,C,D]=[a,b,c,d],w=words.slice(i,i+16);
-    a=ff(a,b,c,d,w[0],7,-680876936);d=ff(d,a,b,c,w[1],12,-389564586);c=ff(c,d,a,b,w[2],17,606105819);b=ff(b,c,d,a,w[3],22,-1044525330);
-    a=ff(a,b,c,d,w[4],7,-176418897);d=ff(d,a,b,c,w[5],12,1200080426);c=ff(c,d,a,b,w[6],17,-1473231341);b=ff(b,c,d,a,w[7],22,-45705983);
-    a=ff(a,b,c,d,w[8],7,1770035416);d=ff(d,a,b,c,w[9],12,-1958414417);c=ff(c,d,a,b,w[10],17,-42063);b=ff(b,c,d,a,w[11],22,-1990404162);
-    a=ff(a,b,c,d,w[12],7,1804603682);d=ff(d,a,b,c,w[13],12,-40341101);c=ff(c,d,a,b,w[14],17,-1502002290);b=ff(b,c,d,a,w[15],22,1236535329);
-    a=gg(a,b,c,d,w[1],5,-165796510);d=gg(d,a,b,c,w[6],9,-1069501632);c=gg(c,d,a,b,w[11],14,643717713);b=gg(b,c,d,a,w[0],20,-373897302);
-    a=gg(a,b,c,d,w[5],5,-701558691);d=gg(d,a,b,c,w[10],9,38016083);c=gg(c,d,a,b,w[15],14,-660478335);b=gg(b,c,d,a,w[4],20,-405537848);
-    a=gg(a,b,c,d,w[9],5,568446438);d=gg(d,a,b,c,w[14],9,-1019803690);c=gg(c,d,a,b,w[3],14,-187363961);b=gg(b,c,d,a,w[8],20,1163531501);
-    a=gg(a,b,c,d,w[13],5,-1444681467);d=gg(d,a,b,c,w[2],9,-51403784);c=gg(c,d,a,b,w[7],14,1735328473);b=gg(b,c,d,a,w[12],20,-1926607734);
-    a=hh(a,b,c,d,w[5],4,-378558);d=hh(d,a,b,c,w[8],11,-2022574463);c=hh(c,d,a,b,w[11],16,1839030562);b=hh(b,c,d,a,w[14],23,-35309556);
-    a=hh(a,b,c,d,w[1],4,-1530992060);d=hh(d,a,b,c,w[4],11,1272893353);c=hh(c,d,a,b,w[7],16,-155497632);b=hh(b,c,d,a,w[10],23,-1094730640);
-    a=hh(a,b,c,d,w[13],4,681279174);d=hh(d,a,b,c,w[0],11,-358537222);c=hh(c,d,a,b,w[3],16,-722521979);b=hh(b,c,d,a,w[6],23,76029189);
-    a=hh(a,b,c,d,w[9],4,-640364487);d=hh(d,a,b,c,w[12],11,-421815835);c=hh(c,d,a,b,w[15],16,530742520);b=hh(b,c,d,a,w[2],23,-995338651);
-    a=ii(a,b,c,d,w[0],6,-198630844);d=ii(d,a,b,c,w[7],10,1126891415);c=ii(c,d,a,b,w[14],15,-1416354905);b=ii(b,c,d,a,w[5],21,-57434055);
-    a=ii(a,b,c,d,w[12],6,1700485571);d=ii(d,a,b,c,w[3],10,-1894986606);c=ii(c,d,a,b,w[10],15,-1051523);b=ii(b,c,d,a,w[1],21,-2054922799);
-    a=ii(a,b,c,d,w[8],6,1873313359);d=ii(d,a,b,c,w[15],10,-30611744);c=ii(c,d,a,b,w[6],15,-1560198380);b=ii(b,c,d,a,w[13],21,1309151649);
-    a=ii(a,b,c,d,w[4],6,-145523070);d=ii(d,a,b,c,w[11],10,-1120210379);c=ii(c,d,a,b,w[2],15,718787259);b=ii(b,c,d,a,w[9],21,-343485551);
-    a=safeAdd(a,A);b=safeAdd(b,B);c=safeAdd(c,C);d=safeAdd(d,D);
-  }
-  const out=new Uint8Array(16),odv=new DataView(out.buffer);
-  odv.setInt32(0,a,true);odv.setInt32(4,b,true);odv.setInt32(8,c,true);odv.setInt32(12,d,true);
-  return out;
-}
-
-// RC4 cipher
-function rc4(key, data) {
-  const s=new Uint8Array(256); for(let i=0;i<256;i++) s[i]=i;
-  for(let i=0,j=0;i<256;i++){j=(j+s[i]+key[i%key.length])&255;[s[i],s[j]]=[s[j],s[i]];}
-  const out=new Uint8Array(data.length);
-  let i=0,j=0;
-  for(let k=0;k<data.length;k++){i=(i+1)&255;j=(j+s[i])&255;[s[i],s[j]]=[s[j],s[i]];out[k]=data[k]^s[(s[i]+s[j])&255];}
-  return out;
-}
-
-// Standard PDF 32-byte padding
-const PDF_PAD = new Uint8Array([0x28,0xBF,0x4E,0x5E,0x4E,0x75,0x8A,0x41,0x64,0x00,0x4E,0x56,0xFF,0xFA,0x01,0x08,0x2E,0x2E,0x00,0xB6,0xD0,0x68,0x3E,0x80,0x2F,0x0C,0xA9,0xFE,0x64,0x53,0x69,0x7A]);
-
-function strToBytes(s) { return new TextEncoder().encode(s); }
-function concatU8(...arrays) {
-  const len = arrays.reduce((a,b)=>a+b.length,0), out=new Uint8Array(len); let off=0;
-  arrays.forEach(a=>{out.set(a,off);off+=a.length;}); return out;
-}
-
-function pdfPadPassword(pwd) {
-  const b = strToBytes(pwd.slice(0,32));
-  const padded = new Uint8Array(32);
-  padded.set(b.slice(0,32)); padded.set(PDF_PAD.slice(0,32-b.length),b.length);
-  return padded;
-}
-
-function pdfComputeKey(userPwd, ownerHash, permissions, fileId, keyLen=16) {
-  // Step 1: pad user password
-  const padded = pdfPadPassword(userPwd);
-  // Step 2: MD5(padded + ownerHash + permissions LE + fileId)
-  const permBytes = new Uint8Array(4);
-  const dv = new DataView(permBytes.buffer); dv.setInt32(0, permissions, true);
-  let hash = md5(concatU8(padded, ownerHash, permBytes, fileId));
-  // 50 rounds
-  for(let i=0;i<50;i++) hash = md5(hash.slice(0,keyLen));
-  return hash.slice(0,keyLen);
-}
-
-function pdfComputeOwnerHash(ownerPwd, userPwd, keyLen=16) {
-  const opad = pdfPadPassword(ownerPwd);
-  let key = md5(opad);
-  for(let i=0;i<50;i++) key=md5(key.slice(0,keyLen));
-  key = key.slice(0,keyLen);
-  let data = pdfPadPassword(userPwd);
-  for(let i=0;i<20;i++){
-    const k=new Uint8Array(keyLen); for(let j=0;j<keyLen;j++) k[j]=key[j]^i;
-    data=rc4(k,data);
-  }
-  return data;
-}
-
-function pdfComputeUserHash(encKey, fileId) {
-  let data = rc4(encKey, concatU8(PDF_PAD, fileId));
-  for(let i=1;i<20;i++){
-    const k=new Uint8Array(encKey.length); for(let j=0;j<encKey.length;j++) k[j]=encKey[j]^i;
-    data=rc4(k,data);
-  }
-  const out=new Uint8Array(32); out.set(data); return out;
-}
-
-// Encrypt PDF bytes with RC4-128 (PDF standard security handler revision 3)
-async function encryptPdfBytes(pdfBytes, userPwd, ownerPwd) {
-  const keyLen = 16; // 128-bit
-  const permissions = -3904; // allow printing, deny everything else (standard restricted)
-
-  // Random file ID (16 bytes)
-  const fileId = crypto.getRandomValues(new Uint8Array(16));
-  const fileIdHex = Array.from(fileId).map(b=>b.toString(16).padStart(2,'0')).join('');
-
-  const oHash = pdfComputeOwnerHash(ownerPwd||userPwd, userPwd, keyLen);
-  const encKey = pdfComputeKey(userPwd, oHash, permissions, fileId, keyLen);
-  const uHash  = pdfComputeUserHash(encKey, fileId);
-
-  const oHex = Array.from(oHash).map(b=>b.toString(16).padStart(2,'0')).join('');
-  const uHex = Array.from(uHash).map(b=>b.toString(16).padStart(2,'0')).join('');
-
-  // Parse existing PDF, add encryption dict and encrypt strings/streams
-  // Strategy: use pdf-lib to get the raw bytes, then patch in an /Encrypt dict
-  // Load with pdf-lib, add encrypt dict to trailer, re-encrypt all streams
-  const doc = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-
-  // Build encrypt dictionary as raw PDF string to inject
-  const encDict = `<<
-/Filter /Standard
-/V 2
-/R 3
-/Length 128
-/P ${permissions}
-/O <${oHex}>
-/U <${uHex}>
->>`;
-
-  // We'll use a simpler approach: rebuild as raw PDF with encryption headers
-  // pdf-lib doesn't support writing encryption natively in 1.17.1
-  // So we manually patch the saved bytes
-  const rawBytes = await doc.save({ useObjectStreams: false });
-  return patchPdfEncryption(rawBytes, encDict, encKey, fileId, fileIdHex, permissions, oHex, uHex);
-}
-
-function patchPdfEncryption(rawBytes, encDict, encKey, fileId, fileIdHex, permissions, oHex, uHex) {
-  // Decode PDF to string for manipulation
-  let text = '';
-  for(let i=0;i<rawBytes.length;i++) text += String.fromCharCode(rawBytes[i]);
-
-  // Add /Encrypt reference to trailer
-  // Find trailer dict and inject /Encrypt entry
-  const encObjNum = 9999; // use a high object number unlikely to conflict
-
-  // Inject the encrypt object before %%EOF
-  const eofIdx = text.lastIndexOf('%%EOF');
-  if(eofIdx === -1) {
-    // Fallback: just return unencrypted with warning
-    console.warn('PDF structure not recognized for encryption');
-    return rawBytes;
-  }
-
-  // Find the xref offset
-  const startxrefMatch = text.lastIndexOf('startxref');
-  const xrefOffset = parseInt(text.slice(startxrefMatch+10).trim());
-
-  // Build new encrypt object
-  const encObj = `${encObjNum} 0 obj\n${encDict}\nendobj\n`;
-  const newXrefOffset = rawBytes.length + encObj.length; // approximate
-
-  // Find trailer and add /Encrypt entry
-  const trailerIdx = text.lastIndexOf('trailer');
-  let newText = text.slice(0, trailerIdx);
-  let trailerSection = text.slice(trailerIdx);
-  // Add /Encrypt and /ID to trailer dict
-  trailerSection = trailerSection.replace('<<', `<<\n/Encrypt ${encObjNum} 0 R\n/ID [<${fileIdHex}><${fileIdHex}>]`);
-
-  const finalText = newText + trailerSection;
-  const finalBytes = new Uint8Array(finalText.length + encObj.length);
-  for(let i=0;i<finalText.length;i++) finalBytes[i]=finalText.charCodeAt(i)&0xFF;
-  for(let i=0;i<encObj.length;i++) finalBytes[finalText.length+i]=encObj.charCodeAt(i)&0xFF;
-  return finalBytes;
+/* ── SECURITY — server-side AES-256 encryption via pikepdf ── */
+function mkTimeout(ms) {
+  // AbortSignal.timeout is not available in all browsers; use controller fallback
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), ms);
+  return ctrl.signal;
 }
 
 $('applyPwdBtn').addEventListener('click', async () => {
   const pages = S.toolPages['security']; if (!pages?.length) return;
-  const userPwd  = $('userPassword').value;
-  const ownerPwd = $('ownerPassword').value || userPwd;
+  const userPwd  = $('userPassword').value.trim();
+  const ownerPwd = ($('ownerPassword').value || userPwd).trim();
   if (!userPwd) { toast('Enter a password first.', 'error'); return; }
-  loading(true, 'Encrypting PDF…');
+
+  loading(true, 'Building PDF…');
+  let pdfBytes;
   try {
-    const pdfBytes  = await buildPdf(pages);
-    const encrypted = await encryptPdfBytes(pdfBytes, userPwd, ownerPwd);
-    dlBytes(encrypted, 'protected.pdf');
-    $('userPassword').value = '';
+    pdfBytes = await buildPdf(pages);
+  } catch(e) {
+    console.error(e);
+    toast(`PDF build failed: ${e.message}`, 'error');
+    loading(false); return;
+  }
+
+  loading(true, 'Encrypting… (server may take 15s to wake)');
+  try {
+    const formData = new FormData();
+    formData.append('file', new Blob([pdfBytes], { type:'application/pdf' }), 'document.pdf');
+    formData.append('userPassword', userPwd);
+    formData.append('ownerPassword', ownerPwd);
+
+    const res = await fetch(`${SERVER_URL}/encrypt`, {
+      method: 'POST', body: formData, mode: 'cors',
+      signal: mkTimeout(90000),
+    });
+
+    // Server sends heartbeat spaces then JSON — strip and parse
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw.trim()); }
+    catch(_) { throw new Error(`Server error (${res.status}): ${raw.slice(0,200)}`); }
+
+    if (!json.ok) throw new Error(json.error || 'Encryption failed on server');
+
+    // base64 → Uint8Array → download
+    const bin = atob(json.data);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    dlBytes(out, 'protected.pdf');
+
+    $('userPassword').value  = '';
     $('ownerPassword').value = '';
     toast('✓ Password-protected PDF downloaded!', 'success');
   } catch(e) {
