@@ -115,7 +115,7 @@
     </div>
     <div class="tool-card" data-tool="security">
       <div class="tool-card-icon" style="--c:#f74f6a"><i class="fa-solid fa-lock"></i></div>
-      <div class="tool-card-text"><h3>Protect PDF</h3><p>Password-protect your document</p></div>
+      <div class="tool-card-text"><h3>Protect / Unlock PDF</h3><p>Password-protect or remove a password from your document</p></div>
     </div>
 
     <!-- SERVER-SIDE CONVERSIONS -->
@@ -696,36 +696,70 @@
       </div>
     </div>
 
-    <!-- ── SECURITY ── -->
+    <!-- ── SECURITY (Protect / Unlock) ── -->
     <div id="panel-security" class="panel">
-      <h2 class="panel-title"><i class="fa-solid fa-lock"></i> Protect PDF</h2>
+      <h2 class="panel-title"><i class="fa-solid fa-lock"></i> Protect / Unlock PDF</h2>
 
-      <div class="tool-upload-zone" id="securityUploadZone">
-        <i class="fa-solid fa-file-arrow-up"></i>
-        <p>Drop your PDF here or click to upload</p>
-        <input type="file" id="securityFileInput" accept="application/pdf" hidden/>
-        <button class="btn-primary" onclick="document.getElementById('securityFileInput').click()">
-          <i class="fa-solid fa-upload"></i> Choose PDF
-        </button>
+      <!-- Protect / Unlock tabs -->
+      <div class="tab-row">
+        <button class="tab-btn active" data-sectab="protect">Protect</button>
+        <button class="tab-btn" data-sectab="unlock">Unlock</button>
       </div>
-      <div id="securityFileInfo" class="tool-file-info hidden"></div>
 
-      <div id="securityControls" class="tool-controls hidden">
-        <p class="panel-desc">Set a password to restrict who can open your PDF. Encryption is done entirely in your browser.</p>
-        <div class="form-group"><label>Password to Open</label>
-          <div class="input-eye">
-            <input type="password" id="userPassword" class="input" placeholder="Required to open PDF…"/>
-            <button class="icon-btn" onclick="togglePwd('userPassword')"><i class="fa-solid fa-eye"></i></button>
-          </div>
+      <!-- ── PROTECT TAB ── -->
+      <div id="secProtectTab">
+        <div class="tool-upload-zone" id="securityUploadZone">
+          <i class="fa-solid fa-file-arrow-up"></i>
+          <p>Drop your PDF here or click to upload</p>
+          <input type="file" id="securityFileInput" accept="application/pdf" hidden/>
+          <button class="btn-primary" onclick="document.getElementById('securityFileInput').click()">
+            <i class="fa-solid fa-upload"></i> Choose PDF
+          </button>
         </div>
-        <div class="form-group"><label>Owner Password <span class="hint">(optional — for permissions)</span></label>
-          <div class="input-eye">
-            <input type="password" id="ownerPassword" class="input" placeholder="Defaults to same as above…"/>
-            <button class="icon-btn" onclick="togglePwd('ownerPassword')"><i class="fa-solid fa-eye"></i></button>
+        <div id="securityFileInfo" class="tool-file-info hidden"></div>
+
+        <div id="securityControls" class="tool-controls hidden">
+          <p class="panel-desc">Set a password to restrict who can open your PDF. Encryption runs on your private server.</p>
+          <div class="form-group"><label>Password to Open</label>
+            <div class="input-eye">
+              <input type="password" id="userPassword" class="input" placeholder="Required to open PDF…"/>
+              <button class="icon-btn" onclick="togglePwd('userPassword')"><i class="fa-solid fa-eye"></i></button>
+            </div>
           </div>
+          <div class="form-group"><label>Owner Password <span class="hint">(optional — for permissions)</span></label>
+            <div class="input-eye">
+              <input type="password" id="ownerPassword" class="input" placeholder="Defaults to same as above…"/>
+              <button class="icon-btn" onclick="togglePwd('ownerPassword')"><i class="fa-solid fa-eye"></i></button>
+            </div>
+          </div>
+          <button id="applyPwdBtn" class="btn-action"><i class="fa-solid fa-lock"></i> Encrypt &amp; Download PDF</button>
+          <p class="hint mt"><i class="fa-solid fa-server"></i> AES-256 encryption via your private Render server.</p>
         </div>
-        <button id="applyPwdBtn" class="btn-action"><i class="fa-solid fa-lock"></i> Encrypt & Download PDF</button>
-        <p class="hint mt"><i class="fa-solid fa-shield"></i> 128-bit RC4 encryption · Nothing is sent to any server.</p>
+      </div>
+
+      <!-- ── UNLOCK TAB ── -->
+      <div id="secUnlockTab" class="hidden">
+        <div class="tool-upload-zone" id="unlockUploadZone">
+          <i class="fa-solid fa-file-arrow-up"></i>
+          <p>Drop your password-protected PDF here or click to upload</p>
+          <input type="file" id="unlockFileInput" accept="application/pdf" hidden/>
+          <button class="btn-primary" onclick="document.getElementById('unlockFileInput').click()">
+            <i class="fa-solid fa-upload"></i> Choose PDF
+          </button>
+        </div>
+        <div id="unlockFileInfo" class="tool-file-info hidden"></div>
+
+        <div class="tool-controls">
+          <p class="panel-desc">Enter the PDF's current password to remove protection.</p>
+          <div class="form-group"><label>Current Password</label>
+            <div class="input-eye">
+              <input type="password" id="unlockPassword" class="input" placeholder="Enter current password…"/>
+              <button class="icon-btn" onclick="togglePwd('unlockPassword')"><i class="fa-solid fa-eye"></i></button>
+            </div>
+          </div>
+          <button id="applyUnlockBtn" class="btn-action" disabled><i class="fa-solid fa-unlock"></i> Unlock &amp; Download PDF</button>
+          <p class="hint mt"><i class="fa-solid fa-server"></i> Runs on your private Render server · Files deleted immediately after.</p>
+        </div>
       </div>
     </div>
 
