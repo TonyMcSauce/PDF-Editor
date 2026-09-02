@@ -7,6 +7,9 @@
  *  - Shared "active PDF" per-tool — switching tools doesn't lose your file
  *  - Merge has its own multi-file upload (no shared PDF needed)
  *  - Images→PDF has its own image upload (no PDF needed)
+ *
+ * v7.1:
+ *  - Protect / Unlock tabs inside the Security panel (server-side pikepdf)
  */
 
 /* ── CONFIG ── */
@@ -22,11 +25,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = CFG.WORKER;
 
 /* ── STATE ── */
 const S = {
-  // Each tool stores its own pages array independently
-  toolPages: {},      // { toolName: [pageDesc, ...] }
+  toolPages: {},
   activeTool: null,
-
-  // Convenience getters for current tool's pages
   get pages() { return S.toolPages[S.activeTool] || []; },
   set pages(v) { S.toolPages[S.activeTool] = v; },
   get totalPages() { return S.pages.length; },
@@ -43,6 +43,9 @@ const S = {
   annoteStart: null, annoteCurStroke: null,
   redactBoxes: [], redactDrawing: false, redactStart: null,
   compressQuality: 0.92,
+
+  // Raw file for Unlock tab — not rasterized through pdf.js
+  unlockFile: null,
 };
 
 /* ── HELPERS ── */
@@ -128,7 +131,6 @@ function activatePanel(name) {
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.panel === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${name}`));
 
-  // Sync preview to this tool's pages if loaded
   if (S.pages.length) {
     S.curPage = Math.max(1, Math.min(S.curPage, S.totalPages));
     previewMain(S.curPage);
@@ -151,20 +153,10 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
 });
 
 /* ── PER-TOOL PDF UPLOAD ── */
-/**
- * Generic function to wire up a tool's upload zone.
- * toolName: key in S.toolPages
- * inputId:  <input type="file"> id
- * zoneId:   drop zone div id
- * infoId:   file info badge div id
- * controlsId: controls to reveal after upload (optional)
- * onLoaded:  callback after pages built
- */
-// Map each toolName to its action button id
 const TOOL_ACTION_BTN = {
   split:       'splitBtn',
   compress:    'compressBtn',
-  pages:       null,   // no single action btn (grid-based)
+  pages:       null,
   annotate:    'annotateApplyBtn',
   text:        'addTextBtn',
   image:       'addImageBtn',
@@ -190,7 +182,6 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
       S.toolPages[toolName] = Array.from({ length: doc.numPages }, (_, i) => ({
         pdfJsDoc: doc, pageNum: i + 1, rotation: 0, overlays: [],
       }));
-      // Show file badge
       info.innerHTML = `
         <i class="fa-solid fa-file-pdf fi-icon"></i>
         <div style="flex:1;min-width:0">
@@ -201,11 +192,9 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
       hide(zone); show(info);
       if (controlsId) show($(controlsId));
 
-      // Enable this tool's action button
       const btnId = TOOL_ACTION_BTN[toolName];
       if (btnId) { const b = $(btnId); if (b) b.disabled = false; }
 
-      // If this is the active tool, update preview
       if (S.activeTool === toolName) {
         S.curPage = 1;
         await previewMain(1);
@@ -237,7 +226,6 @@ window.resetToolUpload = (toolName, inputId, zoneId, infoId, controlsId) => {
   $(inputId).value = '';
   show($(zoneId)); hide($(infoId));
   if (controlsId) hide($(controlsId));
-  // Disable the tool's action button
   const btnId = TOOL_ACTION_BTN[toolName];
   if (btnId) { const b = $(btnId); if (b) b.disabled = true; }
   if (S.activeTool === toolName) {
@@ -249,7 +237,6 @@ window.resetToolUpload = (toolName, inputId, zoneId, infoId, controlsId) => {
   }
 };
 
-// Wire every tool that needs a single PDF
 wirePdfUpload({ toolName:'split',      inputId:'splitFileInput',      zoneId:'splitUploadZone',      infoId:'splitFileInfo',      controlsId:null });
 wirePdfUpload({ toolName:'compress',   inputId:'compressFileInput',   zoneId:'compressUploadZone',   infoId:'compressFileInfo',   controlsId:null });
 wirePdfUpload({ toolName:'pages',      inputId:'pagesFileInput',      zoneId:'pagesUploadZone',      infoId:'pagesFileInfo',      controlsId:'pagesToolbar' });
@@ -294,7 +281,6 @@ function drawOverlaysOnCanvas(canvas, overlays, vp) {
       if (o.imgEl) ctx.drawImage(o.imgEl, o.x*sc, o.y*sc, o.w*sc, o.h*sc);
     } else if (o.type === 'watermark') {
       const cW = canvas.width, cH = canvas.height;
-      // Use fractional position if set, else default to centre
       const cx = o.xFrac !== undefined ? cW * o.xFrac : cW / 2;
       const cy = o.yFrac !== undefined ? cH * o.yFrac : cH / 2;
       ctx.globalAlpha = o.opacity;
@@ -368,33 +354,28 @@ async function previewMain(pg) {
   $('placementOverlay').width = cv.width; $('placementOverlay').height = cv.height;
   updateNav();
 
-  // Fit textBoxLayer exactly over the canvas after layout completes
   requestAnimationFrame(() => {
     const layer = $('textBoxLayer');
     const wrap  = $('previewWrap');
     const wRect = wrap.getBoundingClientRect();
     const cRect = cv.getBoundingClientRect();
-    // Position relative to the wrap (scrollable container)
     layer.style.top    = (cRect.top  - wRect.top  + wrap.scrollTop)  + 'px';
     layer.style.left   = (cRect.left - wRect.left + wrap.scrollLeft) + 'px';
     layer.style.width  = cRect.width  + 'px';
     layer.style.height = cRect.height + 'px';
     if (typeof tbSyncToPage === 'function') tbSyncToPage(pg);
 
-    // Keep watermark preview canvas in sync
     const wmc = $('wmPreviewCanvas');
     wmc.style.top  = cv.offsetTop  + 'px';
     wmc.style.left = cv.offsetLeft + 'px';
     if (typeof wmDrawPreview === 'function') wmDrawPreview();
 
-    // Keep signature placement layer in sync (scroll-aware)
     const spl = $('sigPlacementLayer');
     spl.style.top    = (cRect.top  - wRect.top  + wrap.scrollTop)  + 'px';
     spl.style.left   = (cRect.left - wRect.left + wrap.scrollLeft) + 'px';
     spl.style.width  = cRect.width  + 'px';
     spl.style.height = cRect.height + 'px';
 
-    // Sync redact layer (scroll-aware)
     if (typeof rdSyncLayer === 'function') { rdSyncLayer(); rdRenderBoxes(); }
   });
 }
@@ -560,7 +541,6 @@ $('splitBtn').addEventListener('click', async () => {
   finally { loading(false); }
 });
 
-
 /* ── COMPRESS ── */
 document.querySelectorAll('.compress-opt').forEach(opt => {
   opt.addEventListener('click', () => {
@@ -674,7 +654,6 @@ async function renderGrid() {
       const m=p.splice(ev.oldIndex,1)[0]; p.splice(ev.newIndex,0,m);
       grid.querySelectorAll('.page-thumb').forEach((el,i)=>{el.dataset.idx=i;el.querySelector('.page-thumb-label').textContent=`Page ${i+1}`;});
       S.selectedPgs.clear();
-      // Update preview to show new page order
       const newCur = Math.min(S.curPage, p.length);
       previewMain(newCur);
       toast('Reordered. Download to save.','info');
@@ -715,7 +694,6 @@ document.querySelectorAll('.annotate-tool-btn').forEach(btn=>{
 });
 const dl=$('drawingLayer');
 function getDrawPos(e){
-  // Always measure against previewCanvas, not drawingLayer, to avoid CSS offset issues
   const cv=document.getElementById('previewCanvas');
   const rect=cv.getBoundingClientRect(),src=e.touches?e.touches[0]:e;
   return{x:(src.clientX-rect.left)*(cv.width/rect.width),y:(src.clientY-rect.top)*(cv.height/rect.height)};
@@ -764,30 +742,16 @@ $('annotateApplyBtn').addEventListener('click',async()=>{
 });
 
 /* ══════════════════════════════════════════════════════════════
-   TEXT TOOL  —  SimplePDF-style inline text boxes
-   
-   How it works:
-   1. textBoxLayer (absolute div over canvas) receives clicks
-   2. Click on empty space → create box at cursor
-   3. Each box: contenteditable div + ✕ delete btn + SE resize handle
-   4. Clicking box border (not content) → drag to move
-   5. Float toolbar appears above selected box (font/size/color/B/I/delete)
-   6. Apply → compute PDF coords via canvas bounding rect, burn in
-   
-   Coordinate system:
-   - Boxes are positioned relative to textBoxLayer
-   - textBoxLayer overlaps the canvas exactly (same inset as canvas padding)
-   - On apply: box.left/top → canvas-relative → PDF-space via viewport scale
+   TEXT TOOL
 ══════════════════════════════════════════════════════════════ */
 
 const TB = {
-  boxes:      [],      // { id, el, contentEl, page }
+  boxes:      [],
   nextId:     1,
   active:     false,
   selectedId: null,
 };
 
-// ── Grab float bar elements ────────────────────────
 const tbFB    = () => $('tbFloatBar');
 const tbFFont = () => $('tbFloatFont');
 const tbFSize = () => $('tbFloatSize');
@@ -795,7 +759,6 @@ const tbFClr  = () => $('tbFloatColor');
 const tbFBold = () => $('tbFloatBold');
 const tbFItal = () => $('tbFloatItalic');
 
-// ── Helper: read default style from sidebar ────────
 function tbDefaultStyle() {
   return {
     font:   $('tbDefFont')?.value  || 'Arial',
@@ -806,7 +769,6 @@ function tbDefaultStyle() {
   };
 }
 
-// ── Apply a style object to a DOM element ─────────
 function tbApplyStyleToEl(el, s) {
   el.style.fontFamily = s.font;
   el.style.fontSize   = s.size + 'px';
@@ -815,7 +777,6 @@ function tbApplyStyleToEl(el, s) {
   el.style.fontStyle  = s.italic ? 'italic' : 'normal';
 }
 
-// ── Mode enter/exit ───────────────────────────────
 function tbEnter() {
   TB.active = true;
   $('previewWrap').classList.add('text-mode');
@@ -832,14 +793,13 @@ function tbCheckEnter() {
   else tbExit();
 }
 
-// ── Float bar positioning ─────────────────────────
 function tbPositionBar(boxEl) {
   const fb = tbFB(); if (!fb) return;
   const br  = boxEl.getBoundingClientRect();
   const fbH = fb.offsetHeight || 42;
   const fbW = fb.offsetWidth  || 310;
   let top  = br.top - fbH - 10;
-  if (top < 60) top = br.bottom + 10;                 // flip below if no space
+  if (top < 60) top = br.bottom + 10;
   let left = br.left;
   if (left + fbW > window.innerWidth - 8) left = window.innerWidth - fbW - 8;
   fb.style.top  = Math.max(4, top) + 'px';
@@ -848,13 +808,11 @@ function tbPositionBar(boxEl) {
 }
 function tbHideBar() { tbFB()?.classList.add('hidden'); }
 
-// ── Selection ────────────────────────────────────
 function tbSelect(id) {
   TB.selectedId = id;
   TB.boxes.forEach(b => b.el.classList.toggle('selected', b.id === id));
   const box = TB.boxes.find(b => b.id === id);
   if (!box) return;
-  // Sync float bar to this box's current computed style
   const ce = box.contentEl;
   const cs = window.getComputedStyle(ce);
   const ff = tbFFont(), fs = tbFSize(), fc = tbFClr(), fb2 = tbFBold(), fi = tbFItal();
@@ -871,7 +829,6 @@ function tbDeselect() {
   tbHideBar();
 }
 
-// ── Float bar → apply style to selected box ──────
 function tbApplyFloat() {
   const box = TB.boxes.find(b => b.id === TB.selectedId);
   if (!box) return;
@@ -885,7 +842,6 @@ function tbApplyFloat() {
   tbApplyStyleToEl(box.contentEl, s);
 }
 
-// Wire float bar events
 ['tbFloatFont','tbFloatSize','tbFloatColor'].forEach(id => {
   $(id)?.addEventListener('input',  tbApplyFloat);
   $(id)?.addEventListener('change', tbApplyFloat);
@@ -906,29 +862,23 @@ $('tbFloatDup')?.addEventListener('click', () => {
   const y = parseFloat(box.el.style.top)  + 16;
   const nb = tbCreate(x, y);
   nb.contentEl.innerHTML = box.contentEl.innerHTML;
-  // Copy styles
-  const cs = window.getComputedStyle(box.contentEl);
   nb.contentEl.style.cssText = box.contentEl.style.cssText;
   tbSelect(nb.id);
 });
 
-// Wire sidebar default buttons
 $('tbDefBold')?.addEventListener('click',   () => $('tbDefBold').classList.toggle('active'));
 $('tbDefItalic')?.addEventListener('click', () => $('tbDefItalic').classList.toggle('active'));
 
-// ── Create a text box ─────────────────────────────
 function tbCreate(xPx, yPx) {
   const s  = tbDefaultStyle();
   const id = TB.nextId++;
 
-  // Outer wrapper
   const box       = document.createElement('div');
   box.className   = 'inline-textbox';
   box.dataset.tbid = String(id);
   box.style.left  = xPx + 'px';
   box.style.top   = yPx + 'px';
 
-  // Editable content
   const content = document.createElement('div');
   content.className       = 'tb-content';
   content.contentEditable = 'true';
@@ -936,7 +886,6 @@ function tbCreate(xPx, yPx) {
   content.dataset.placeholder = 'Type here…';
   tbApplyStyleToEl(content, s);
 
-  // ✕ Delete button
   const del       = document.createElement('button');
   del.className   = 'tb-delete';
   del.textContent = '✕';
@@ -944,7 +893,6 @@ function tbCreate(xPx, yPx) {
   del.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
   del.addEventListener('click',     e => { e.stopPropagation(); tbRemove(id); });
 
-  // SE resize handle
   const rz      = document.createElement('div');
   rz.className  = 'tb-resize-handle';
   rz.title      = 'Drag to resize';
@@ -954,7 +902,6 @@ function tbCreate(xPx, yPx) {
   box.appendChild(rz);
   $('textBoxLayer').appendChild(box);
 
-  // ── Drag / resize logic ────────────────────────
   let dragMode = null, dsx, dsy, dox, doy, dow, doh;
 
   const startDrag = (mode, e) => {
@@ -969,15 +916,11 @@ function tbCreate(xPx, yPx) {
 
   box.addEventListener('mousedown', e => {
     tbSelect(id);
-    // Resize handle
     if (e.target === rz) { startDrag('resize', e); return; }
-    // Content → don't drag, allow typing
     if (e.target === content || e.target.closest('.tb-content')) {
       e.stopPropagation(); return;
     }
-    // Delete btn → handled separately
     if (e.target === del) return;
-    // Anything else on the box (border) → move
     startDrag('move', e);
   });
 
@@ -987,7 +930,7 @@ function tbCreate(xPx, yPx) {
     if (dragMode === 'move') {
       box.style.left = (dox + dx) + 'px';
       box.style.top  = (doy + dy) + 'px';
-      if (TB.selectedId === id) tbPositionBar(box); // keep toolbar aligned
+      if (TB.selectedId === id) tbPositionBar(box);
     } else {
       box.style.width  = Math.max(60,  dow + dx) + 'px';
       box.style.height = Math.max(24, doh + dy) + 'px';
@@ -997,14 +940,13 @@ function tbCreate(xPx, yPx) {
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup',   onMouseUp);
 
-  // Focus → select
   content.addEventListener('focus', () => tbSelect(id));
 
   const cv = $('previewCanvas');
   const record = {
     id, el: box, contentEl: content,
     page:    S.curPage,
-    canvasW: cv.offsetWidth,   // display size at creation — used for PDF coord scaling
+    canvasW: cv.offsetWidth,
     canvasH: cv.offsetHeight,
   };
   TB.boxes.push(record);
@@ -1014,7 +956,6 @@ function tbCreate(xPx, yPx) {
   return record;
 }
 
-// ── Helpers ───────────────────────────────────────
 function placeCursorAtEnd(el) {
   const range = document.createRange();
   const sel   = window.getSelection();
@@ -1030,7 +971,6 @@ function rgbToHex(rgb) {
   return '#' + m.slice(0,3).map(n => parseInt(n).toString(16).padStart(2,'0')).join('');
 }
 
-// ── Remove / clear ────────────────────────────────
 function tbRemove(id) {
   const idx = TB.boxes.findIndex(b => b.id === id);
   if (idx === -1) return;
@@ -1055,7 +995,6 @@ function tbUpdateApplyBtn() {
     : `<i class="fa-solid fa-check"></i> Apply Text to PDF &amp; Download`;
 }
 
-// Show only boxes for current page, hide others
 function tbSyncToPage(pg) {
   TB.boxes.forEach(b => {
     const onThisPage = b.page === pg;
@@ -1064,15 +1003,13 @@ function tbSyncToPage(pg) {
   });
 }
 
-// ── Click on empty layer → create new box ─────────
 $('textBoxLayer').addEventListener('mousedown', e => {
   if (!TB.active) return;
-  if (e.target !== $('textBoxLayer')) return; // only empty space
+  if (e.target !== $('textBoxLayer')) return;
   const rect = $('textBoxLayer').getBoundingClientRect();
   tbCreate(e.clientX - rect.left, e.clientY - rect.top);
 });
 
-// ── Click outside boxes → deselect ───────────────
 document.addEventListener('mousedown', e => {
   if (!TB.active) return;
   if (e.target.closest('.inline-textbox')) return;
@@ -1080,14 +1017,12 @@ document.addEventListener('mousedown', e => {
   tbDeselect();
 });
 
-// ── Switch tool → exit text mode ─────────────────
 document.querySelectorAll('.tool-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.dataset.panel !== 'text') tbExit();
   });
 });
 
-// ── Apply all boxes to PDF ────────────────────────
 $('addTextBtn').addEventListener('click', async () => {
   const pages = S.toolPages['text'];
   if (!pages?.length) return;
@@ -1099,12 +1034,9 @@ $('addTextBtn').addEventListener('click', async () => {
     const pageIdx = (box.page || 1) - 1;
     if (!pages[pageIdx]) continue;
 
-    // box.left/top are canvas-relative pixels (layer == canvas, no offset)
     const bx = parseFloat(box.el.style.left) || 0;
     const by = parseFloat(box.el.style.top)  || 0;
 
-    // Scale from canvas display size → PDF coordinate space
-    // Use the canvas size that was recorded when this box was created
     const canvasW = box.canvasW;
     const canvasH = box.canvasH;
 
@@ -1160,18 +1092,16 @@ $('addImageBtn').addEventListener('click',async()=>{
 });
 
 /* ══════════════════════════════════════════════════
-   WATERMARK  —  live preview, draggable, real-time styling
+   WATERMARK
 ══════════════════════════════════════════════════ */
 
 const WM = {
-  // Position as fraction of canvas (0–1), default centre
   xFrac: 0.5,
   yFrac: 0.5,
-  imgEl: null,      // loaded image element for image watermarks
-  active: false,    // true when watermark panel is open & PDF loaded
+  imgEl: null,
+  active: false,
 };
 
-// ── Tab switching ──────────────────────────────────
 document.querySelectorAll('.tab-btn[data-wtab]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn[data-wtab]').forEach(b => b.classList.remove('active'));
@@ -1182,11 +1112,9 @@ document.querySelectorAll('.tab-btn[data-wtab]').forEach(btn => {
   });
 });
 
-// ── Bold / Italic buttons ──────────────────────────
 $('wmBold')?.addEventListener('click',   () => { $('wmBold').classList.toggle('active');   wmDrawPreview(); });
 $('wmItalic')?.addEventListener('click', () => { $('wmItalic').classList.toggle('active'); wmDrawPreview(); });
 
-// ── All live-update inputs ─────────────────────────
 ['wmText','wmFont','wmSize','wmColor','wmOpacity','wmAngle','wmImgW','wmImgH'].forEach(id => {
   $(id)?.addEventListener('input',  wmDrawPreview);
   $(id)?.addEventListener('change', wmDrawPreview);
@@ -1196,7 +1124,6 @@ $('wmOpacity').addEventListener('input', () => {
   wmDrawPreview();
 });
 
-// Image upload → load & preview immediately
 $('wmImageInput').addEventListener('change', async () => {
   const f = $('wmImageInput').files[0];
   if (!f) return;
@@ -1204,7 +1131,6 @@ $('wmImageInput').addEventListener('change', async () => {
   catch(e) { toast(e.message, 'error'); }
 });
 
-// ── Build current watermark descriptor from UI ─────
 function wmGetDesc() {
   const isImg   = !$('wmImageTab').classList.contains('hidden');
   const opacity = (+$('wmOpacity').value) / 100;
@@ -1224,7 +1150,6 @@ function wmGetDesc() {
   };
 }
 
-// ── Draw watermark onto a canvas at given position ─
 function wmRenderToCanvas(ctx, canvasW, canvasH, desc, xFrac, yFrac) {
   ctx.save();
   ctx.globalAlpha = desc.opacity || 0.3;
@@ -1245,7 +1170,6 @@ function wmRenderToCanvas(ctx, canvasW, canvasH, desc, xFrac, yFrac) {
   ctx.restore();
 }
 
-// ── Redraw the live preview canvas ─────────────────
 function wmDrawPreview() {
   const cv  = $('previewCanvas');
   const wmc = $('wmPreviewCanvas');
@@ -1261,7 +1185,6 @@ function wmDrawPreview() {
   wmRenderToCanvas(ctx, wmc.width, wmc.height, wmGetDesc(), WM.xFrac, WM.yFrac);
 }
 
-// ── Draggable watermark on preview canvas ──────────
 (function() {
   let dragging = false, lastX, lastY;
   const wmc = $('wmPreviewCanvas');
@@ -1283,7 +1206,6 @@ function wmDrawPreview() {
   document.addEventListener('mouseup', () => {
     if (dragging) { dragging = false; $('wmPreviewCanvas').style.cursor = 'move'; }
   });
-  // Touch support
   wmc.addEventListener('touchstart', e => {
     dragging = true; const t = e.touches[0]; lastX = t.clientX; lastY = t.clientY;
     e.preventDefault();
@@ -1300,14 +1222,12 @@ function wmDrawPreview() {
   wmc.addEventListener('touchend', () => { dragging = false; });
 })();
 
-// ── Activate / deactivate preview ─────────────────
 function wmActivate() {
   WM.active = true;
   WM.xFrac  = 0.5;
   WM.yFrac  = 0.5;
   $('wmPreviewCanvas').classList.add('active');
 
-  // Position the preview canvas over the PDF canvas
   const cv  = $('previewCanvas');
   const wmc = $('wmPreviewCanvas');
   wmc.style.top  = cv.offsetTop  + 'px';
@@ -1323,8 +1243,6 @@ function wmDeactivate() {
   ctx.clearRect(0, 0, wmc.width, wmc.height);
 }
 
-// Hook into tool switching
-const _origActivatePanel = typeof activatePanel === 'function' ? activatePanel : null;
 document.querySelectorAll('.tool-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.dataset.panel === 'watermark') {
@@ -1337,7 +1255,6 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
   });
 });
 
-// ── Update undo/remove button states ──────────────
 function wmUpdateUndoBtns() {
   const pages   = S.toolPages['watermark'] || [];
   const hasAny  = pages.some(p => p.overlays.some(o => o.type === 'watermark'));
@@ -1345,20 +1262,16 @@ function wmUpdateUndoBtns() {
   $('wmClearBtn').disabled = !hasAny;
 }
 
-// ── Undo last watermark (removes most recently applied batch) ──
 $('wmUndoBtn').addEventListener('click', async () => {
   const pages = S.toolPages['watermark'];
   if (!pages?.length) return;
-  // Find the last watermark overlay added and remove that entire batch
-  // We track by removing the last watermark from each page simultaneously
   let removed = false;
   pages.forEach(p => {
-    // Find last watermark index on this page
     for (let i = p.overlays.length - 1; i >= 0; i--) {
       if (p.overlays[i].type === 'watermark') {
         p.overlays.splice(i, 1);
         removed = true;
-        break; // only remove last one per page
+        break;
       }
     }
   });
@@ -1369,7 +1282,6 @@ $('wmUndoBtn').addEventListener('click', async () => {
   }
 });
 
-// ── Remove ALL watermarks from all pages ───────────
 $('wmClearBtn').addEventListener('click', async () => {
   const pages = S.toolPages['watermark'];
   if (!pages?.length) return;
@@ -1417,7 +1329,6 @@ $('wmBtn').addEventListener('click', async () => {
 });
 
 /* ── PAGE NUMBERS ── */
-// Live preview helper — computes overlay for given page index
 async function pnMakeOverlay(pages, i) {
   const pos   = $('pnPosition').value;
   const start = parseInt($('pnStart').value, 10) || 1;
@@ -1441,22 +1352,18 @@ async function pnMakeOverlay(pages, i) {
   return { type:'pagenumber', text, size, color, x, y, align };
 }
 
-// Preview: apply temp overlay to current page and re-render (don't save)
 async function pnPreview() {
   const pages = S.toolPages['pagenumbers'];
   if (!pages?.length) return;
   const idx = S.curPage - 1;
-  // Remove any existing preview overlay, add fresh one
   pages[idx].overlays = pages[idx].overlays.filter(o => o.type !== 'pagenumber_preview');
   const o = await pnMakeOverlay(pages, idx);
-  o.type = 'pagenumber_preview'; // mark as preview — not saved
+  o.type = 'pagenumber_preview';
   pages[idx].overlays.push(o);
   await previewMain(S.curPage);
-  // Clean up preview overlay (it's just for display, removed on next render)
   pages[idx].overlays = pages[idx].overlays.filter(o => o.type !== 'pagenumber_preview');
 }
 
-// Wire all pn inputs to trigger live preview
 ['pnPosition','pnStart','pnSize','pnColor','pnFormat'].forEach(id => {
   $(id)?.addEventListener('input',  pnPreview);
   $(id)?.addEventListener('change', pnPreview);
@@ -1504,12 +1411,11 @@ $('pnClearBtn').addEventListener('click', async () => {
   toast('All page numbers removed.', 'success');
 });
 
-/* ── REDACT ── */
 /* ══════════════════════════════════════════════════
-   REDACT  —  smallpdf-style div boxes, pixel-perfect coords
+   REDACT
 ══════════════════════════════════════════════════ */
 const RD = {
-  boxes:   [],   // { el, xFrac, yFrac, wFrac, hFrac, color }
+  boxes:   [],
   color:   '#000000',
   active:  false,
   drawing: false,
@@ -1521,7 +1427,6 @@ const rdDrag   = document.createElement('div');
 rdDrag.id = 'rdDragBox';
 rdLayer.appendChild(rdDrag);
 
-// Color picker
 document.querySelectorAll('.rdclr').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.rdclr').forEach(b => b.classList.remove('active'));
@@ -1533,7 +1438,6 @@ document.querySelectorAll('.rdclr').forEach(btn => {
 function rdSyncLayer() {
   const cv   = $('previewCanvas');
   const wrap = $('previewWrap');
-  // Match canvas exactly, accounting for scroll (same logic as textBoxLayer)
   const wRect = wrap.getBoundingClientRect();
   const cRect = cv.getBoundingClientRect();
   rdLayer.style.top    = (cRect.top  - wRect.top  + wrap.scrollTop)  + 'px';
@@ -1606,7 +1510,6 @@ function rdCreateBox(xFrac, yFrac, wFrac, hFrac, color) {
 }
 
 function rdRenderBoxes() {
-  // Re-render all existing boxes (after page change / resize)
   RD.boxes.forEach(b => {
     b.el.style.left   = (b.xFrac * 100) + '%';
     b.el.style.top    = (b.yFrac * 100) + '%';
@@ -1615,7 +1518,6 @@ function rdRenderBoxes() {
   });
 }
 
-// Mouse drag to draw boxes
 rdLayer.addEventListener('mousedown', e => {
   if (!RD.active || e.target !== rdLayer && e.target !== rdDrag) return;
   const rect = rdLayer.getBoundingClientRect();
@@ -1656,12 +1558,11 @@ document.addEventListener('mouseup', e => {
   const y = Math.min(RD.startY, cy);
   const w = Math.abs(cx - RD.startX);
   const h = Math.abs(cy - RD.startY);
-  if (w < 8 || h < 8) return; // too small, ignore
+  if (w < 8 || h < 8) return;
   const lw = rect.width, lh = rect.height;
   rdCreateBox(x/lw, y/lh, w/lw, h/lh, RD.color);
 });
 
-// Undo / Clear
 $('redactUndoBtn').addEventListener('click', () => {
   const b = RD.boxes.pop();
   if (b) { b.el.remove(); rdUpdateList(); }
@@ -1672,7 +1573,6 @@ $('redactClearBtn').addEventListener('click', () => {
   rdUpdateList();
 });
 
-// Apply — burn boxes into overlays using fractional coords → PDF space
 $('redactApplyBtn').addEventListener('click', async () => {
   const pages = S.toolPages['redact']; if (!pages?.length) return;
   if (!RD.boxes.length) { toast('Draw at least one box first.', 'error'); return; }
@@ -1694,7 +1594,6 @@ $('redactApplyBtn').addEventListener('click', async () => {
       });
     });
 
-    // Clear boxes and re-render
     RD.boxes.forEach(b => b.el.remove());
     RD.boxes = [];
     rdUpdateList();
@@ -1703,7 +1602,6 @@ $('redactApplyBtn').addEventListener('click', async () => {
   } finally { loading(false); }
 });
 
-// Hook into enterRedactMode / exitRedactMode
 function enterRedactMode() { rdEnter(); }
 function exitRedactMode()  { rdExit(); }
 
@@ -1711,10 +1609,8 @@ function exitRedactMode()  { rdExit(); }
 const sigCv  = $('sigCanvas');
 const sigCtx = sigCv.getContext('2d');
 
-// Signature drawing
 $('clearSig').addEventListener('click', () => {
   sigCtx.clearRect(0, 0, sigCv.width, sigCv.height);
-  // Remove placement box too — signature is blank now
   if (SIG.boxEl) { SIG.boxEl.remove(); SIG.boxEl = null; }
   $('addSigBtn').disabled = true;
 });
@@ -1729,10 +1625,9 @@ function sigDraw(e) {
   sigCtx.lineWidth   = +$('sigStroke').value;
   sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round';
   sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
-  // Auto-show box on first ink; then keep live in sync
   if (SIG.active) {
     if (!SIG.boxEl) {
-      sigShowBox(); // place at default position automatically
+      sigShowBox();
     } else {
       const img = SIG.boxEl.querySelector('img');
       if (img) img.src = sigCv.toDataURL('image/png');
@@ -1747,7 +1642,6 @@ sigCv.addEventListener('touchstart', e => { e.preventDefault(); S.sigDrawing=tru
 sigCv.addEventListener('touchmove',  e => sigDraw(e), {passive:false});
 sigCv.addEventListener('touchend',   () => { S.sigDrawing=false; sigCheckDrawn(); });
 
-// State
 const SIG = { boxEl: null, active: false };
 
 function sigCheckDrawn() {
@@ -1755,13 +1649,12 @@ function sigCheckDrawn() {
   const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
   const hasInk = px.data.some(v => v > 0);
   if (hasInk) {
-    if (!SIG.boxEl) sigShowBox(); // auto-place if not yet shown
+    if (!SIG.boxEl) sigShowBox();
     else {
       const img = SIG.boxEl.querySelector('img');
       if (img) img.src = sigCv.toDataURL('image/png');
     }
   } else {
-    // No ink (e.g. after clearSig) — remove box
     if (SIG.boxEl) { SIG.boxEl.remove(); SIG.boxEl = null; }
     $('addSigBtn').disabled = true;
   }
@@ -1774,10 +1667,8 @@ function sigUpdateBtns() {
   $('sigClearBtn').disabled = !hasAny;
 }
 
-// Show/create the draggable signature box on the preview at click position
 function sigShowBox(clickX, clickY) {
   const layer = $('sigPlacementLayer');
-  // Remove existing box
   if (SIG.boxEl) SIG.boxEl.remove();
 
   const cv  = $('previewCanvas');
@@ -1792,11 +1683,9 @@ function sigShowBox(clickX, clickY) {
   resH.className = 'sig-resize';
   box.appendChild(resH);
 
-  // Default size
   const defW = Math.round(cv.offsetWidth  * 0.30);
   const defH = Math.round(cv.offsetHeight * 0.10);
 
-  // Place centred on click, clamped to layer
   const lw = cv.offsetWidth, lh = cv.offsetHeight;
   const left = clickX !== undefined
     ? Math.max(0, Math.min(lw - defW, clickX - defW/2))
@@ -1848,21 +1737,17 @@ function sigActivate() {
   layer.classList.add('active');
   sigUpdateBtns();
 
-  // Click on empty layer area → place box at click position
   layer.addEventListener('click', sigLayerClick);
 
-  // Show box if signature already drawn
   const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
   if (px.data.some(v => v > 0)) sigShowBox();
 }
 
 function sigLayerClick(e) {
-  // Only trigger on the layer itself, not on the box
   if (e.target !== $('sigPlacementLayer')) return;
   const rect = $('sigPlacementLayer').getBoundingClientRect();
   const cx = e.clientX - rect.left;
   const cy = e.clientY - rect.top;
-  // Check ink
   const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
   if (!px.data.some(v => v > 0)) {
     toast('Draw your signature first, then click to place it.', 'info');
@@ -1879,7 +1764,6 @@ function sigDeactivate() {
   $('addSigBtn').disabled = true;
 }
 
-// Hook into tool switching
 document.querySelectorAll('.tool-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.dataset.panel === 'signature') {
@@ -1890,8 +1774,6 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
   });
 });
 
-// Hook PDF load
-const _origWirePdfSig = wirePdfUpload;
 (function() {
   const obs = new MutationObserver(() => {
     if (!$('signatureControls').classList.contains('hidden') && S.activeTool === 'signature' && !SIG.active) {
@@ -1901,10 +1783,6 @@ const _origWirePdfSig = wirePdfUpload;
   obs.observe($('signatureControls'), { attributes:true, attributeFilter:['class'] });
 })();
 
-// Re-sync layer position on page change
-const _sigPreviewHook = previewMain;
-
-// Embed signature button
 $('addSigBtn').addEventListener('click', async () => {
   const pages = S.toolPages['signature']; if (!pages?.length) return;
   if (!SIG.boxEl) { toast('Place your signature on the page first.', 'error'); return; }
@@ -1912,7 +1790,6 @@ $('addSigBtn').addEventListener('click', async () => {
   const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
   if (!px.data.some(v => v > 0)) { toast('Draw a signature first.', 'error'); return; }
 
-  // Convert box position to PDF coordinates
   const cv      = $('previewCanvas');
   const layer   = $('sigPlacementLayer');
   const bx      = parseFloat(SIG.boxEl.style.left) || 0;
@@ -1941,10 +1818,8 @@ $('addSigBtn').addEventListener('click', async () => {
   toast('Signature embedded!', 'success');
 });
 
-// Undo / Clear
 $('sigUndoBtn').addEventListener('click', async () => {
   const pages = S.toolPages['signature']; if (!pages?.length) return;
-  // Remove last signature overlay from any page (scan all)
   let removed = false;
   for (let pi = pages.length - 1; pi >= 0 && !removed; pi--) {
     for (let oi = pages[pi].overlays.length - 1; oi >= 0; oi--) {
@@ -1975,15 +1850,27 @@ $('sigClearBtn').addEventListener('click', async () => {
   toast('All signatures removed.', 'success');
 });
 
-/* ── SECURITY — server-side AES-256 encryption via pikepdf ── */
+/* ── SERVER_URL (shared by security + conversions) ── */
+const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
+
 function mkTimeout(ms) {
-  // AbortSignal.timeout is not available in all browsers; use controller fallback
   if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
   const ctrl = new AbortController();
   setTimeout(() => ctrl.abort(), ms);
   return ctrl.signal;
 }
 
+/* ── SECURITY: Protect / Unlock tab switching ── */
+document.querySelectorAll('.tab-btn[data-sectab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn[data-sectab]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    $('secProtectTab').classList.toggle('hidden', btn.dataset.sectab !== 'protect');
+    $('secUnlockTab').classList.toggle('hidden',  btn.dataset.sectab !== 'unlock');
+  });
+});
+
+/* ── PROTECT — server-side AES-256 encryption via pikepdf ── */
 $('applyPwdBtn').addEventListener('click', async () => {
   const pages = S.toolPages['security']; if (!pages?.length) return;
   const userPwd  = $('userPassword').value.trim();
@@ -2012,7 +1899,6 @@ $('applyPwdBtn').addEventListener('click', async () => {
       signal: mkTimeout(90000),
     });
 
-    // Server sends heartbeat spaces then JSON — strip and parse
     const raw = await res.text();
     let json;
     try { json = JSON.parse(raw.trim()); }
@@ -2020,7 +1906,6 @@ $('applyPwdBtn').addEventListener('click', async () => {
 
     if (!json.ok) throw new Error(json.error || 'Encryption failed on server');
 
-    // base64 → Uint8Array → download
     const bin = atob(json.data);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -2032,6 +1917,84 @@ $('applyPwdBtn').addEventListener('click', async () => {
   } catch(e) {
     console.error(e);
     toast(`Encryption failed: ${e.message}`, 'error');
+  } finally {
+    loading(false);
+  }
+});
+
+/* ── UNLOCK — upload zone (raw file, no rasterization) ── */
+function wireUnlockUpload() {
+  const input = $('unlockFileInput');
+  const zone  = $('unlockUploadZone');
+  const info  = $('unlockFileInfo');
+
+  function handleFile(file) {
+    if (!file || file.type !== 'application/pdf') { toast('Please select a valid PDF.', 'error'); return; }
+    if (!okSize(file)) return;
+    S.unlockFile = file;
+    info.innerHTML = `
+      <i class="fa-solid fa-file-pdf fi-icon"></i>
+      <div style="flex:1;min-width:0">
+        <div class="fi-name">${file.name}</div>
+        <div class="fi-size">${fmtSize(file.size)}</div>
+      </div>
+      <button class="fi-change" id="unlockChangeBtn">Change</button>`;
+    hide(zone); show(info);
+    $('applyUnlockBtn').disabled = false;
+    $('unlockChangeBtn').addEventListener('click', () => {
+      S.unlockFile = null;
+      input.value = '';
+      show(zone); hide(info);
+      $('applyUnlockBtn').disabled = true;
+    });
+    toast(`Loaded "${file.name}"`, 'success');
+  }
+
+  input.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+}
+wireUnlockUpload();
+
+/* ── UNLOCK — apply ── */
+$('applyUnlockBtn').addEventListener('click', async () => {
+  const file = S.unlockFile;
+  if (!file) { toast('Upload a password-protected PDF first.', 'error'); return; }
+  const pwd = $('unlockPassword').value.trim();
+  if (!pwd) { toast('Enter the current password.', 'error'); return; }
+
+  loading(true, 'Unlocking… (server may take 15s to wake)');
+  try {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    formData.append('password', pwd);
+
+    const res = await fetch(`${SERVER_URL}/decrypt`, {
+      method: 'POST', body: formData, mode: 'cors',
+      signal: mkTimeout(90000),
+    });
+
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw.trim()); }
+    catch(_) { throw new Error(`Server error (${res.status}): ${raw.slice(0,200)}`); }
+
+    if (!json.ok) throw new Error(json.error || 'Decryption failed on server');
+
+    const bin = atob(json.data);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    dlBytes(out, 'unlocked.pdf');
+
+    $('unlockPassword').value = '';
+    toast('✓ Unlocked PDF downloaded!', 'success');
+  } catch(e) {
+    console.error(e);
+    toast(`Unlock failed: ${e.message}`, 'error');
   } finally {
     loading(false);
   }
@@ -2051,8 +2014,6 @@ $('downloadBtn').addEventListener('click',async()=>{
    PDF → Word / Excel / PowerPoint via Render server
 ══════════════════════════════════════════════════ */
 
-const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
-
 [
   { tool:'pdftoword',  zoneId:'pdftowordUploadZone',  infoId:'pdftowordFileInfo',  btnId:'pdftowordBtn',  statusId:'pdftowordStatus',  endpoint:'/convert/word',  ext:'docx', label:'Word' },
   { tool:'pdftoexcel', zoneId:'pdftoexcelUploadZone', infoId:'pdftoexcelFileInfo', btnId:'pdftoexcelBtn', statusId:'pdftoexcelStatus', endpoint:'/convert/excel', ext:'xlsx', label:'Excel' },
@@ -2061,7 +2022,6 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
 
   let storedFile = null;
 
-  // Create a fresh file input dynamically — avoids hidden input issues across browsers
   function makeInput() {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'application/pdf';
@@ -2100,14 +2060,11 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
     toast(`Loaded "${file.name}"`, 'success');
   }
 
-  // Whole zone is clickable
   const zone = $(zoneId);
   zone.addEventListener('click', e => {
-    // Don't trigger if they clicked the inner button (it will trigger too)
     if (e.target.tagName === 'BUTTON') return;
     makeInput().click();
   });
-  // The "Choose PDF" button inside the zone
   zone.querySelector('button')?.addEventListener('click', e => {
     e.stopPropagation();
     makeInput().click();
@@ -2124,7 +2081,6 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
     if (!storedFile) return;
     $(btnId).disabled = true;
 
-    // Step 1: ping to wake server (Render free tier sleeps after 15 min)
     setStatus('working', '⏳ Waking up server…');
     try {
       await fetch(`${SERVER_URL}/ping`, { method: 'GET', mode: 'cors', signal: AbortSignal.timeout(20000) });
@@ -2132,7 +2088,6 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
       await new Promise(r => setTimeout(r, 4000));
     }
 
-    // Step 2: convert — server streams keep-alive spaces then ends with JSON
     setStatus('working', `⚙ Converting to ${label}… please wait`);
     try {
       const formData = new FormData();
@@ -2145,7 +2100,7 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
             method: 'POST',
             body:   formData,
             mode:   'cors',
-            signal: AbortSignal.timeout(180000), // 3 min max
+            signal: AbortSignal.timeout(180000),
           });
           break;
         } catch (fetchErr) {
@@ -2155,14 +2110,11 @@ const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
         }
       }
 
-      // Server always returns 200 with JSON (even on errors), because
-      // it uses chunked streaming — parse the text and trim whitespace/spaces
       const raw  = await res.text();
       const json = JSON.parse(raw.trim());
 
       if (!json.ok) throw new Error(json.error || `Conversion failed`);
 
-      // Decode base64 → Blob → download
       const byteChars = atob(json.data);
       const byteArr   = new Uint8Array(byteChars.length);
       for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
@@ -2198,4 +2150,4 @@ window.resetServerTool = resetServerTool;
 
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v7 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v7.1 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
