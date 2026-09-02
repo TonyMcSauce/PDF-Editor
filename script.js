@@ -2042,10 +2042,32 @@ $('downloadBtn').addEventListener('click',async()=>{
     show(el);
   }
 
-  function handleFile(file) {
+  async function handleFile(file) {
     if (!file || file.type !== 'application/pdf') { toast('Please select a valid PDF.', 'error'); return; }
     if (!okSize(file)) return;
     storedFile = file;
+
+    // Load into pdf.js purely for the right-hand preview — the raw `file`
+    // (not this parsed doc) is still what gets sent to the server to convert.
+    loading(true, 'Loading preview…');
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const doc   = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      S.toolPages[tool] = Array.from({ length: doc.numPages }, (_, i) => ({
+        pdfJsDoc: doc, pageNum: i + 1, rotation: 0, overlays: [],
+      }));
+      if (S.activeTool === tool) {
+        S.curPage = 1;
+        await previewMain(1);
+      }
+    } catch (e) {
+      console.error('[preview load]', e);
+      // Preview failing shouldn't block conversion — just skip the preview.
+      S.toolPages[tool] = [];
+    } finally {
+      loading(false);
+    }
+
     $(infoId).innerHTML = `
       <i class="fa-solid fa-file-pdf fi-icon"></i>
       <div style="flex:1;min-width:0">
@@ -2145,6 +2167,11 @@ function resetServerTool(tool, zoneId, infoId, btnId, statusId) {
   show($(zoneId)); hide($(infoId));
   $(btnId).disabled = true;
   hide($(statusId));
+  S.toolPages[tool] = [];
+  if (S.activeTool === tool) {
+    hide($('previewCanvas')); show($('previewPlaceholder'));
+    $('pageIndicator').textContent = '— / —';
+  }
 }
 window.resetServerTool = resetServerTool;
 
