@@ -2175,6 +2175,15 @@ function resetServerTool(tool, zoneId, infoId, btnId, statusId) {
 }
 window.resetServerTool = resetServerTool;
 
+/* ── TOOL CARD CURSOR GLOW ── */
+document.querySelectorAll('.tool-card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100) + '%');
+    card.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100) + '%');
+  });
+});
+
 /* ── INIT ── */
 showHome();
 console.log('%c PDF Studio v7.1 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
