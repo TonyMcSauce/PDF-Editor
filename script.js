@@ -31,7 +31,7 @@ const S = {
   set pages(v) { S.toolPages[S.activeTool] = v; },
   get totalPages() { return S.pages.length; },
 
-  curPage: 1, zoom: 1.0, isDark: true,
+  curPage: 1, zoom: 1.0, isDark: false,
   selectedPgs: new Set(),
 
   mergeSources: [], _mergeViewIdx: 0,
@@ -206,6 +206,7 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
         if (toolName === 'text')     tbCheckEnter();
         if (toolName === 'watermark') setTimeout(() => { if (typeof wmActivate==='function') wmActivate(); }, 50);
         if (toolName === 'signature') setTimeout(() => { if (typeof sigActivate==='function') sigActivate(); }, 50);
+        if (toolName === 'image')     setTimeout(() => { if (typeof imgActivate==='function') imgActivate(); }, 50);
       }
       toast(`Loaded "${file.name}" — ${doc.numPages} pages`, 'success');
     } catch (e) { console.error(e); toast(`Load failed: ${e.message}`, 'error'); }
@@ -376,6 +377,12 @@ async function previewMain(pg) {
     spl.style.width  = cRect.width  + 'px';
     spl.style.height = cRect.height + 'px';
 
+    const ipl = $('imgPlacementLayer');
+    ipl.style.top    = (cRect.top  - wRect.top  + wrap.scrollTop)  + 'px';
+    ipl.style.left   = (cRect.left - wRect.left + wrap.scrollLeft) + 'px';
+    ipl.style.width  = cRect.width  + 'px';
+    ipl.style.height = cRect.height + 'px';
+
     if (typeof rdSyncLayer === 'function') { rdSyncLayer(); rdRenderBoxes(); }
   });
 }
@@ -386,14 +393,17 @@ function updateNav() {
   $('nextPage').disabled = !S.totalPages || S.curPage >= S.totalPages;
 }
 function updateDownloadBtn() {
-  $('downloadBtn').disabled = !S.pages.length;
+  const on = !!S.pages.length;
+  $('downloadBtn').disabled = !on;
+  const b2 = $('downloadBtn2'); if (b2) b2.disabled = !on;
 }
 $('prevPage').addEventListener('click', () => previewMain(S.curPage - 1));
 $('nextPage').addEventListener('click', () => previewMain(S.curPage + 1));
 $('zoomIn').addEventListener('click',  () => { S.zoom = Math.min(CFG.ZOOM_MAX, +(S.zoom+CFG.ZOOM_STEP).toFixed(2)); $('zoomLabel').textContent = Math.round(S.zoom*100)+'%'; previewMain(); });
 $('zoomOut').addEventListener('click', () => { S.zoom = Math.max(CFG.ZOOM_MIN, +(S.zoom-CFG.ZOOM_STEP).toFixed(2)); $('zoomLabel').textContent = Math.round(S.zoom*100)+'%'; previewMain(); });
 
-/* ── PLACEMENT OVERLAY ── */
+/* ── PLACEMENT OVERLAY (legacy — kept only in case a future tool needs
+   crosshair-style coordinate picking; Image/Signature no longer use it) ── */
 function clearPlacementOverlay() {
   const ov = $('placementOverlay'); if (!ov) return;
   ov.getContext('2d').clearRect(0, 0, ov.width, ov.height);
@@ -407,8 +417,6 @@ $('placementOverlay').addEventListener('click', e => {
   const cy = (e.clientY-rect.top)*(ov.height/rect.height);
   const sc = CFG.PREVIEW_SCALE * S.zoom;
   const px = Math.round(cx/sc), py = Math.round(cy/sc);
-  if (S.placeMode==='text')      { $('textX').value=px; $('textY').value=py; }
-  if (S.placeMode==='image')     { $('imgX').value=px;  $('imgY').value=py; }
   const ctx = ov.getContext('2d');
   ctx.clearRect(0,0,ov.width,ov.height);
   ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
@@ -421,21 +429,13 @@ $('placementOverlay').addEventListener('click', e => {
 });
 function setPlaceMode(mode, btnId) {
   S.placeMode = S.placeMode===mode ? null : mode;
-  ['imgPickBtn'].forEach(id => {
-    const b=$(id); if(!b) return;
-    b.classList.remove('active-pick');
-    b.innerHTML='<i class="fa-solid fa-crosshairs"></i> Pick on Page';
-  });
   const ov = $('placementOverlay');
   if (S.placeMode) {
     ov.style.pointerEvents='all';
     $('previewWrap').classList.add('placement-active');
-    const b=$(btnId);
-    if(b){b.classList.add('active-pick');b.innerHTML='<i class="fa-solid fa-xmark"></i> Cancel';}
     toast('Click on the preview to set position.','info',3000);
   } else { clearPlacementOverlay(); }
 }
-$('imgPickBtn').addEventListener('click', () => setPlaceMode('image','imgPickBtn'));
 
 /* ── BUILD PDF ── */
 async function buildPdf(pageDescs, quality = 0.92) {
@@ -780,12 +780,14 @@ function tbApplyStyleToEl(el, s) {
 function tbEnter() {
   TB.active = true;
   $('previewWrap').classList.add('text-mode');
+  show($('textBoxLayer'));
   $('textBoxLayer').classList.add('active');
 }
 function tbExit() {
   TB.active = false;
   $('previewWrap').classList.remove('text-mode');
   $('textBoxLayer').classList.remove('active');
+  hide($('textBoxLayer')); // stop boxes from a different tool showing over the preview
   tbDeselect();
 }
 function tbCheckEnter() {
@@ -893,12 +895,22 @@ function tbCreate(xPx, yPx) {
   del.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault(); });
   del.addEventListener('click',     e => { e.stopPropagation(); tbRemove(id); });
 
+  // Dedicated drag handle — the content area is contentEditable and covers
+  // the whole box, so relying on the 1.5px border to grab-and-move was
+  // nearly impossible. This handle is always a real, easy-to-hit target.
+  const grip      = document.createElement('div');
+  grip.className  = 'tb-drag-handle';
+  grip.title      = 'Drag to move';
+  grip.innerHTML  = '<i class="fa-solid fa-up-down-left-right"></i>';
+  grip.addEventListener('mousedown', e => { e.stopPropagation(); startDragRef(e); });
+
   const rz      = document.createElement('div');
   rz.className  = 'tb-resize-handle';
   rz.title      = 'Drag to resize';
 
   box.appendChild(content);
   box.appendChild(del);
+  box.appendChild(grip);
   box.appendChild(rz);
   $('textBoxLayer').appendChild(box);
 
@@ -913,10 +925,12 @@ function tbCreate(xPx, yPx) {
     doh = box.offsetHeight;
     e.preventDefault(); e.stopPropagation();
   };
+  const startDragRef = e => { tbSelect(id); startDrag('move', e); };
 
   box.addEventListener('mousedown', e => {
     tbSelect(id);
     if (e.target === rz) { startDrag('resize', e); return; }
+    if (e.target === grip || e.target.closest('.tb-drag-handle')) { startDrag('move', e); return; }
     if (e.target === content || e.target.closest('.tb-content')) {
       e.stopPropagation(); return;
     }
@@ -1074,21 +1088,232 @@ $('addTextBtn').addEventListener('click', async () => {
   }
 });
 
-/* ── IMAGE OVERLAY ── */
-$('addImageBtn').addEventListener('click',async()=>{
-  const pages=S.toolPages['image']; if(!pages?.length)return;
-  const fi=$('overlayImageInput'); if(!fi.files[0]){toast('Select an image.','error');return;}
-  const pgNum=parseInt($('imgPage').value,10);
-  if(pgNum<1||pgNum>pages.length){toast(`Page must be 1–${pages.length}.`,'error');return;}
-  loading(true,'Loading image…');
-  try{
-    const imgEl=await loadImgEl(fi.files[0]);
-    pages[pgNum-1].overlays.push({type:'image',imgEl,
-      x:parseFloat($('imgX').value)||0,y:parseFloat($('imgY').value)||0,
-      w:parseFloat($('imgW').value)||150,h:parseFloat($('imgH').value)||100});
-    await previewMain(pgNum); setPlaceMode(null); toast('Image added!','success');
-  }catch(e){toast(`Image error: ${e.message}`,'error');}
-  finally{loading(false);}
+/* ══════════════════════════════════════════════════
+   ADD IMAGE — drag-and-drop placement, live resize/move
+   (mirrors the Signature tool's placement-box pattern instead of
+   baking x/y/w/h typed by hand straight into the raster canvas)
+══════════════════════════════════════════════════ */
+const IMGOV = { boxEl: null, active: false, imgEl: null, srcUrl: null };
+
+$('overlayImageInput').addEventListener('change', async () => {
+  const f = $('overlayImageInput').files[0];
+  if (!f) return;
+  try {
+    IMGOV.imgEl = await loadImgEl(f);
+    if (IMGOV.srcUrl) URL.revokeObjectURL(IMGOV.srcUrl);
+    IMGOV.srcUrl = IMGOV.imgEl.src;
+    $('imgDragThumb').src = IMGOV.srcUrl;
+    show($('imgThumbWrap'));
+    toast('Image loaded — drag it onto the page.', 'info', 3000);
+  } catch(e) { toast(e.message, 'error'); }
+});
+
+function imgUpdateBtns() {
+  const pages  = S.toolPages['image'] || [];
+  const hasAny = pages.some(p => p.overlays.some(o => o.type === 'image'));
+  $('imgUndoBtn').disabled  = !hasAny;
+  $('imgClearBtn').disabled = !hasAny;
+}
+
+// Create/update the live draggable + resizable placement box
+function imgShowBox(clickX, clickY) {
+  if (!IMGOV.imgEl) { toast('Choose an image first.', 'error'); return; }
+  const layer = $('imgPlacementLayer');
+  if (IMGOV.boxEl) IMGOV.boxEl.remove();
+
+  const cv  = $('previewCanvas');
+  const box = document.createElement('div');
+  box.className = 'placement-box';
+
+  const img = document.createElement('img');
+  img.src = IMGOV.srcUrl;
+  box.appendChild(img);
+
+  const resH = document.createElement('div');
+  resH.className = 'ph-resize';
+  box.appendChild(resH);
+
+  const del = document.createElement('button');
+  del.className = 'ph-delete';
+  del.innerHTML = '×';
+  del.title = 'Remove';
+  del.addEventListener('mousedown', e => e.stopPropagation());
+  del.addEventListener('click', e => {
+    e.stopPropagation();
+    box.remove();
+    IMGOV.boxEl = null;
+    $('addImageBtn').disabled = true;
+  });
+  box.appendChild(del);
+
+  // Default size keeps the image's own aspect ratio, capped to a sane box
+  const iw = IMGOV.imgEl.naturalWidth  || 300;
+  const ih = IMGOV.imgEl.naturalHeight || 200;
+  const maxW = cv.offsetWidth  * 0.35;
+  const scale = Math.min(1, maxW / iw);
+  const defW = Math.round(iw * scale);
+  const defH = Math.round(ih * scale);
+
+  const lw = cv.offsetWidth, lh = cv.offsetHeight;
+  const left = clickX !== undefined
+    ? Math.max(0, Math.min(lw - defW, clickX - defW/2))
+    : Math.round((lw - defW) / 2);
+  const top  = clickY !== undefined
+    ? Math.max(0, Math.min(lh - defH, clickY - defH/2))
+    : Math.round((lh - defH) / 2);
+
+  box.style.left   = left + 'px';
+  box.style.top    = top  + 'px';
+  box.style.width  = defW + 'px';
+  box.style.height = defH + 'px';
+
+  let dragMode = null, startX, startY, startL, startT, startW, startH;
+  box.addEventListener('mousedown', e => {
+    if (e.target === resH) dragMode = 'resize';
+    else if (e.target === del) return;
+    else dragMode = 'move';
+    startX = e.clientX; startY = e.clientY;
+    startL = parseInt(box.style.left); startT = parseInt(box.style.top);
+    startW = box.offsetWidth; startH = box.offsetHeight;
+    e.preventDefault(); e.stopPropagation();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragMode) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (dragMode === 'move') {
+      box.style.left = Math.max(0, startL + dx) + 'px';
+      box.style.top  = Math.max(0, startT + dy) + 'px';
+    } else {
+      box.style.width  = Math.max(24, startW + dx) + 'px';
+      box.style.height = Math.max(24, startH + dy) + 'px';
+    }
+  });
+  document.addEventListener('mouseup', () => { dragMode = null; });
+
+  layer.appendChild(box);
+  IMGOV.boxEl = box;
+  $('addImageBtn').disabled = false;
+}
+
+function imgSyncLayerPos() {
+  const layer = $('imgPlacementLayer');
+  const cv = $('previewCanvas');
+  layer.style.top    = cv.offsetTop  + 'px';
+  layer.style.left   = cv.offsetLeft + 'px';
+  layer.style.width  = cv.offsetWidth  + 'px';
+  layer.style.height = cv.offsetHeight + 'px';
+}
+
+function imgActivate() {
+  IMGOV.active = true;
+  imgSyncLayerPos();
+  imgUpdateBtns();
+  $('imgPlacementLayer').addEventListener('click', imgLayerClick);
+}
+function imgLayerClick(e) {
+  if (e.target !== $('imgPlacementLayer')) return;
+  if (!IMGOV.imgEl) return;
+  const rect = $('imgPlacementLayer').getBoundingClientRect();
+  imgShowBox(e.clientX - rect.left, e.clientY - rect.top);
+}
+function imgDeactivate() {
+  IMGOV.active = false;
+  IMGOV.boxEl  = null;
+  $('imgPlacementLayer').innerHTML = '';
+  $('addImageBtn').disabled = true;
+}
+
+document.querySelectorAll('.tool-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.panel === 'image') {
+      setTimeout(() => { if (S.toolPages['image']?.length) imgActivate(); }, 50);
+    } else {
+      imgDeactivate();
+    }
+  });
+});
+
+// ── Real drag-and-drop from the thumbnail onto the page preview ──
+const imgThumb = $('imgDragThumb');
+imgThumb.addEventListener('dragstart', e => {
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', 'pdf-studio-image'); // required by some browsers to permit the drop
+});
+$('previewWrap').addEventListener('dragover', e => {
+  if (S.activeTool !== 'image' || !IMGOV.imgEl) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  $('previewWrap').classList.add('dragover-target');
+});
+$('previewWrap').addEventListener('dragleave', () => {
+  $('previewWrap').classList.remove('dragover-target');
+});
+$('previewWrap').addEventListener('drop', e => {
+  if (S.activeTool !== 'image' || !IMGOV.imgEl) return;
+  e.preventDefault();
+  $('previewWrap').classList.remove('dragover-target');
+  const cv = $('previewCanvas');
+  const rect = cv.getBoundingClientRect();
+  imgShowBox(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+$('addImageBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['image']; if (!pages?.length) return;
+  if (!IMGOV.boxEl || !IMGOV.imgEl) { toast('Drag your image onto the page first.', 'error'); return; }
+
+  const cv = $('previewCanvas');
+  const bx = parseFloat(IMGOV.boxEl.style.left) || 0;
+  const by = parseFloat(IMGOV.boxEl.style.top)  || 0;
+  const bw = IMGOV.boxEl.offsetWidth;
+  const bh = IMGOV.boxEl.offsetHeight;
+
+  const pdfPage = await pages[S.curPage-1].pdfJsDoc.getPage(pages[S.curPage-1].pageNum);
+  const vp      = pdfPage.getViewport({ scale: 1 });
+  const scaleX  = cv.offsetWidth, scaleY = cv.offsetHeight;
+  const xPdf = (bx / scaleX) * vp.width;
+  const yPdf = (by / scaleY) * vp.height;
+  const wPdf = (bw / scaleX) * vp.width;
+  const hPdf = (bh / scaleY) * vp.height;
+
+  pages[S.curPage-1].overlays.push({ type:'image', imgEl: IMGOV.imgEl, x:xPdf, y:yPdf, w:wPdf, h:hPdf });
+  const prevTool = S.activeTool;
+  S.activeTool = 'image';
+  await previewMain(S.curPage);
+  S.activeTool = prevTool;
+  IMGOV.boxEl?.remove();
+  IMGOV.boxEl = null;
+  $('addImageBtn').disabled = true;
+  imgUpdateBtns();
+  toast('Image embedded!', 'success');
+});
+
+$('imgUndoBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['image']; if (!pages?.length) return;
+  let removed = false;
+  for (let pi = pages.length - 1; pi >= 0 && !removed; pi--) {
+    for (let oi = pages[pi].overlays.length - 1; oi >= 0; oi--) {
+      if (pages[pi].overlays[oi].type === 'image') { pages[pi].overlays.splice(oi, 1); removed = true; break; }
+    }
+  }
+  if (removed) {
+    const prevTool = S.activeTool;
+    S.activeTool = 'image';
+    await previewMain(S.curPage);
+    S.activeTool = prevTool;
+  }
+  imgUpdateBtns();
+  toast(removed ? 'Image removed.' : 'Nothing to undo.', removed ? 'success' : 'info');
+});
+
+$('imgClearBtn').addEventListener('click', async () => {
+  const pages = S.toolPages['image']; if (!pages?.length) return;
+  pages.forEach(p => { p.overlays = p.overlays.filter(o => o.type !== 'image'); });
+  const prevTool = S.activeTool;
+  S.activeTool = 'image';
+  await previewMain(S.curPage);
+  S.activeTool = prevTool;
+  imgUpdateBtns();
+  toast('All images removed.', 'success');
 });
 
 /* ══════════════════════════════════════════════════
@@ -1605,14 +1830,35 @@ $('redactApplyBtn').addEventListener('click', async () => {
 function enterRedactMode() { rdEnter(); }
 function exitRedactMode()  { rdExit(); }
 
-/* ── SIGNATURE ── */
+/* ══════════════════════════════════════════════════
+   SIGNATURE — draw or upload, then drag-and-drop onto the page
+   (previously: drawing ink auto-spawned a placement box mid-stroke,
+   which is what made placement feel random. Now: drawing/uploading
+   only fills a small draggable "chip" thumbnail — nothing touches the
+   page until you drag that chip onto it, exactly like Adobe's flow.)
+══════════════════════════════════════════════════ */
 const sigCv  = $('sigCanvas');
 const sigCtx = sigCv.getContext('2d');
 
+const SIG = { boxEl: null, active: false, mode: 'draw', uploadImg: null, srcUrl: null };
+
+/* ── Draw / Upload tabs ── */
+document.querySelectorAll('.tab-btn[data-sigtab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn[data-sigtab]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    SIG.mode = btn.dataset.sigtab;
+    $('sigDrawTab').classList.toggle('hidden', SIG.mode !== 'draw');
+    $('sigUploadTab').classList.toggle('hidden', SIG.mode !== 'upload');
+    sigRefreshThumb();
+  });
+});
+
+/* ── Draw ── */
 $('clearSig').addEventListener('click', () => {
   sigCtx.clearRect(0, 0, sigCv.width, sigCv.height);
-  if (SIG.boxEl) { SIG.boxEl.remove(); SIG.boxEl = null; }
-  $('addSigBtn').disabled = true;
+  hide($('sigDragWrap'));
+  $('addSigBtn').disabled = !SIG.boxEl;
 });
 function sigPos(e) {
   const r = sigCv.getBoundingClientRect(), s = e.touches ? e.touches[0] : e;
@@ -1625,38 +1871,36 @@ function sigDraw(e) {
   sigCtx.lineWidth   = +$('sigStroke').value;
   sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round';
   sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
-  if (SIG.active) {
-    if (!SIG.boxEl) {
-      sigShowBox();
-    } else {
-      const img = SIG.boxEl.querySelector('img');
-      if (img) img.src = sigCv.toDataURL('image/png');
-    }
-  }
 }
 sigCv.addEventListener('mousedown', e => { e.preventDefault(); S.sigDrawing=true; const p=sigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y); });
 sigCv.addEventListener('mousemove', e => sigDraw(e));
-sigCv.addEventListener('mouseup',   () => { S.sigDrawing=false; sigCheckDrawn(); });
+sigCv.addEventListener('mouseup',   () => { S.sigDrawing=false; sigRefreshThumb(); });
 sigCv.addEventListener('mouseleave',() => { S.sigDrawing=false; });
 sigCv.addEventListener('touchstart', e => { e.preventDefault(); S.sigDrawing=true; const p=sigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y); }, {passive:false});
 sigCv.addEventListener('touchmove',  e => sigDraw(e), {passive:false});
-sigCv.addEventListener('touchend',   () => { S.sigDrawing=false; sigCheckDrawn(); });
+sigCv.addEventListener('touchend',   () => { S.sigDrawing=false; sigRefreshThumb(); });
 
-const SIG = { boxEl: null, active: false };
+/* ── Upload ── */
+$('sigImageInput').addEventListener('change', async () => {
+  const f = $('sigImageInput').files[0];
+  if (!f) return;
+  try { SIG.uploadImg = await loadImgEl(f); sigRefreshThumb(); }
+  catch(e) { toast(e.message, 'error'); }
+});
 
-function sigCheckDrawn() {
-  if (!SIG.active) return;
-  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
-  const hasInk = px.data.some(v => v > 0);
-  if (hasInk) {
-    if (!SIG.boxEl) sigShowBox();
-    else {
-      const img = SIG.boxEl.querySelector('img');
-      if (img) img.src = sigCv.toDataURL('image/png');
-    }
+/* Keep the small drag-chip in sync with whichever source is active */
+function sigRefreshThumb() {
+  const wrap = $('sigDragWrap');
+  const thumb = $('sigDragThumb');
+  if (SIG.mode === 'draw') {
+    const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
+    if (!px.data.some(v => v > 0)) { hide(wrap); return; }
+    thumb.src = sigCv.toDataURL('image/png');
+    show(wrap);
   } else {
-    if (SIG.boxEl) { SIG.boxEl.remove(); SIG.boxEl = null; }
-    $('addSigBtn').disabled = true;
+    if (!SIG.uploadImg) { hide(wrap); return; }
+    thumb.src = SIG.uploadImg.src;
+    show(wrap);
   }
 }
 
@@ -1667,21 +1911,43 @@ function sigUpdateBtns() {
   $('sigClearBtn').disabled = !hasAny;
 }
 
+// Build a real <img> for whichever source is currently active — used both
+// for the live placement box and for the final embed.
+function sigCurrentImgSrc() {
+  return SIG.mode === 'draw' ? sigCv.toDataURL('image/png') : (SIG.uploadImg ? SIG.uploadImg.src : null);
+}
+
 function sigShowBox(clickX, clickY) {
+  const src = sigCurrentImgSrc();
+  if (!src) { toast('Draw or upload a signature first.', 'error'); return; }
+
   const layer = $('sigPlacementLayer');
   if (SIG.boxEl) SIG.boxEl.remove();
 
   const cv  = $('previewCanvas');
   const box = document.createElement('div');
-  box.className = 'sig-box';
+  box.className = 'placement-box';
 
   const img = document.createElement('img');
-  img.src = sigCv.toDataURL('image/png');
+  img.src = src;
   box.appendChild(img);
 
   const resH = document.createElement('div');
-  resH.className = 'sig-resize';
+  resH.className = 'ph-resize';
   box.appendChild(resH);
+
+  const del = document.createElement('button');
+  del.className = 'ph-delete';
+  del.innerHTML = '×';
+  del.title = 'Remove';
+  del.addEventListener('mousedown', e => e.stopPropagation());
+  del.addEventListener('click', e => {
+    e.stopPropagation();
+    box.remove();
+    SIG.boxEl = null;
+    $('addSigBtn').disabled = true;
+  });
+  box.appendChild(del);
 
   const defW = Math.round(cv.offsetWidth  * 0.30);
   const defH = Math.round(cv.offsetHeight * 0.10);
@@ -1689,10 +1955,10 @@ function sigShowBox(clickX, clickY) {
   const lw = cv.offsetWidth, lh = cv.offsetHeight;
   const left = clickX !== undefined
     ? Math.max(0, Math.min(lw - defW, clickX - defW/2))
-    : Math.round(lw * 0.05);
+    : Math.round((lw - defW) / 2);
   const top  = clickY !== undefined
     ? Math.max(0, Math.min(lh - defH, clickY - defH/2))
-    : Math.round(lh * 0.75);
+    : Math.round((lh - defH) / 2);
 
   box.style.left   = left + 'px';
   box.style.top    = top  + 'px';
@@ -1702,6 +1968,7 @@ function sigShowBox(clickX, clickY) {
   let dragMode = null, startX, startY, startL, startT, startW, startH;
   box.addEventListener('mousedown', e => {
     if (e.target === resH) dragMode = 'resize';
+    else if (e.target === del) return;
     else dragMode = 'move';
     startX = e.clientX; startY = e.clientY;
     startL = parseInt(box.style.left); startT = parseInt(box.style.top);
@@ -1715,8 +1982,8 @@ function sigShowBox(clickX, clickY) {
       box.style.left = Math.max(0, startL + dx) + 'px';
       box.style.top  = Math.max(0, startT + dy) + 'px';
     } else {
-      box.style.width  = Math.max(60, startW + dx) + 'px';
-      box.style.height = Math.max(30, startH + dy) + 'px';
+      box.style.width  = Math.max(30, startW + dx) + 'px';
+      box.style.height = Math.max(20, startH + dy) + 'px';
     }
   });
   document.addEventListener('mouseup', () => { dragMode = null; });
@@ -1736,24 +2003,19 @@ function sigActivate() {
   layer.style.height = cv.offsetHeight + 'px';
   layer.classList.add('active');
   sigUpdateBtns();
+  sigRefreshThumb();
 
   layer.addEventListener('click', sigLayerClick);
-
-  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
-  if (px.data.some(v => v > 0)) sigShowBox();
 }
 
 function sigLayerClick(e) {
   if (e.target !== $('sigPlacementLayer')) return;
-  const rect = $('sigPlacementLayer').getBoundingClientRect();
-  const cx = e.clientX - rect.left;
-  const cy = e.clientY - rect.top;
-  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
-  if (!px.data.some(v => v > 0)) {
-    toast('Draw your signature first, then click to place it.', 'info');
+  if (!sigCurrentImgSrc()) {
+    toast('Draw or upload your signature first, then click to place it.', 'info');
     return;
   }
-  sigShowBox(cx, cy);
+  const rect = $('sigPlacementLayer').getBoundingClientRect();
+  sigShowBox(e.clientX - rect.left, e.clientY - rect.top);
 }
 
 function sigDeactivate() {
@@ -1783,15 +2045,37 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
   obs.observe($('signatureControls'), { attributes:true, attributeFilter:['class'] });
 })();
 
+/* ── Real drag-and-drop from the sig chip onto the page preview ── */
+$('sigDragThumb').addEventListener('dragstart', e => {
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', 'pdf-studio-signature');
+});
+$('previewWrap').addEventListener('dragover', e => {
+  if (S.activeTool !== 'signature' || !sigCurrentImgSrc()) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  $('previewWrap').classList.add('dragover-target');
+});
+$('previewWrap').addEventListener('dragleave', () => {
+  if (S.activeTool === 'signature') $('previewWrap').classList.remove('dragover-target');
+});
+$('previewWrap').addEventListener('drop', e => {
+  if (S.activeTool !== 'signature' || !sigCurrentImgSrc()) return;
+  e.preventDefault();
+  $('previewWrap').classList.remove('dragover-target');
+  const cv = $('previewCanvas');
+  const rect = cv.getBoundingClientRect();
+  sigShowBox(e.clientX - rect.left, e.clientY - rect.top);
+});
+
 $('addSigBtn').addEventListener('click', async () => {
   const pages = S.toolPages['signature']; if (!pages?.length) return;
-  if (!SIG.boxEl) { toast('Place your signature on the page first.', 'error'); return; }
+  if (!SIG.boxEl) { toast('Drag your signature onto the page first.', 'error'); return; }
 
-  const px = sigCtx.getImageData(0, 0, sigCv.width, sigCv.height);
-  if (!px.data.some(v => v > 0)) { toast('Draw a signature first.', 'error'); return; }
+  const src = sigCurrentImgSrc();
+  if (!src) { toast('Draw or upload a signature first.', 'error'); return; }
 
   const cv      = $('previewCanvas');
-  const layer   = $('sigPlacementLayer');
   const bx      = parseFloat(SIG.boxEl.style.left) || 0;
   const by      = parseFloat(SIG.boxEl.style.top)  || 0;
   const bw      = SIG.boxEl.offsetWidth;
@@ -1806,7 +2090,7 @@ $('addSigBtn').addEventListener('click', async () => {
   const wPdf = (bw / scaleX) * vp.width;
   const hPdf = (bh / scaleY) * vp.height;
 
-  const img = new Image(); img.src = sigCv.toDataURL('image/png');
+  const img = new Image(); img.src = src;
   await new Promise(r => { img.onload = r; });
 
   pages[S.curPage-1].overlays.push({ type:'signature', imgEl:img, x:xPdf, y:yPdf, w:wPdf, h:hPdf });
@@ -1814,6 +2098,9 @@ $('addSigBtn').addEventListener('click', async () => {
   S.activeTool = 'signature';
   await previewMain(S.curPage);
   S.activeTool = prevTool;
+  SIG.boxEl?.remove();
+  SIG.boxEl = null;
+  $('addSigBtn').disabled = true;
   sigUpdateBtns();
   toast('Signature embedded!', 'success');
 });
@@ -2001,13 +2288,15 @@ $('applyUnlockBtn').addEventListener('click', async () => {
 });
 
 /* ── DOWNLOAD (main button, current tool's pages) ── */
-$('downloadBtn').addEventListener('click',async()=>{
+async function doDownload() {
   if(!S.pages.length)return;
   loading(true,'Building PDF…');
   try{ dlBytes(await buildPdf(S.pages),'edited.pdf'); toast('Downloaded!','success'); }
   catch(e){ console.error(e); toast(`Failed: ${e.message}`,'error'); }
   finally{ loading(false); }
-});
+}
+$('downloadBtn').addEventListener('click', doDownload);
+$('downloadBtn2')?.addEventListener('click', doDownload);
 
 /* ══════════════════════════════════════════════════
    SERVER-SIDE CONVERSIONS
@@ -2186,4 +2475,4 @@ document.querySelectorAll('.tool-card').forEach(card => {
 
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v7.1 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v7.2 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
