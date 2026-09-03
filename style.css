@@ -37,6 +37,30 @@ body { font-family:var(--body); background:var(--bg); color:var(--text);
 ::-webkit-scrollbar-track { background:transparent }
 ::-webkit-scrollbar-thumb { background:var(--border-lt); border-radius:3px }
 
+/* ── DARK MODE: gives it its own character instead of just "light mode,
+   inverted" — a faint top glow, a subtle grain texture for depth, and a
+   soft accent bloom around the logo. All disabled automatically for
+   prefers-reduced-motion / users who never touch dark mode at all. ── */
+[data-theme="dark"] body {
+  background:
+    radial-gradient(ellipse 1100px 550px at 50% -8%, rgba(79,142,247,.07), transparent 65%),
+    var(--bg);
+}
+[data-theme="dark"] body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:1;
+  opacity:.035; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+[data-theme="dark"] .tool-card,
+[data-theme="dark"] .sidebar,
+[data-theme="dark"] .panel-area,
+[data-theme="dark"] .app-header {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.025), transparent 45%);
+}
+[data-theme="dark"] .logo-btn i {
+  filter: drop-shadow(0 0 6px rgba(79,142,247,.55));
+}
+
 /* ── HEADER ── */
 .app-header {
   height:var(--hh); background:var(--surface); border-bottom:1px solid var(--border);
@@ -591,6 +615,63 @@ select.input { cursor:pointer }
 }
 .inline-textbox:hover   .tb-resize-handle,
 .inline-textbox.selected .tb-resize-handle { opacity:1 }
+
+/* Drag handle — dedicated grab target since the content area is
+   contentEditable and swallows mousedown for text editing instead */
+.tb-drag-handle {
+  position:absolute; top:-11px; left:50%; transform:translateX(-50%);
+  width:22px; height:16px; border-radius:5px;
+  background:#4f8ef7; color:#fff; border:2px solid #fff;
+  cursor:grab; font-size:.55rem; z-index:210;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 1px 4px rgba(0,0,0,.35);
+  opacity:0; transition:opacity .15s, transform .1s;
+}
+.inline-textbox:hover   .tb-drag-handle,
+.inline-textbox.selected .tb-drag-handle { opacity:1 }
+.tb-drag-handle:hover  { transform:translateX(-50%) scale(1.12) }
+.tb-drag-handle:active { cursor:grabbing }
+
+/* ── Drag-and-drop thumbnail (used by Add Image and Sign PDF) ── */
+.img-drag-thumb-wrap {
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  padding:14px; background:var(--surface); border:1px dashed var(--border-lt);
+  border-radius:var(--r); text-align:center;
+}
+.img-drag-thumb {
+  max-width:100%; max-height:120px; border-radius:6px;
+  cursor:grab; box-shadow:var(--shadow);
+  transition:transform .15s var(--spring);
+  background:repeating-conic-gradient(#00000010 0% 25%, transparent 0% 50%) 50% / 14px 14px;
+}
+.img-drag-thumb:hover  { transform:scale(1.03) }
+.img-drag-thumb:active { cursor:grabbing }
+.sig-drag-thumb { max-height:80px }
+
+/* Live draggable/resizable placement box shared by Image + Signature tools */
+.placement-box {
+  position:absolute; border:1.5px dashed var(--accent);
+  border-radius:4px; cursor:move; box-sizing:border-box;
+  background:rgba(79,142,247,.05);
+}
+.placement-box img { width:100%; height:100%; display:block; object-fit:contain; pointer-events:none }
+.placement-box .ph-resize {
+  position:absolute; bottom:-6px; right:-6px;
+  width:14px; height:14px; background:var(--accent);
+  border:2px solid #fff; border-radius:3px; cursor:se-resize; z-index:20;
+}
+.placement-box .ph-delete {
+  position:absolute; top:-10px; right:-10px;
+  width:20px; height:20px; border-radius:50%;
+  background:var(--danger); color:#fff; border:2px solid #fff;
+  cursor:pointer; font-size:.6rem; display:flex; align-items:center; justify-content:center;
+  z-index:20; box-shadow:0 1px 4px rgba(0,0,0,.35);
+}
+#imgPlacementLayer, #sigPlacementLayer {
+  position:absolute; z-index:150;
+}
+.placement-box { pointer-events:all }
+.preview-canvas-wrap.dragover-target { outline:2px dashed var(--accent); outline-offset:-2px }
 
 .tb-float-bar {
   position:fixed; z-index:9999;
