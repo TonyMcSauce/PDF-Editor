@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>PDF Studio - All-in-One PDF Editor V7.2</title>
+  <title>PDF Studio v7.2 - All-in-One PDF Editor</title>
   <link rel="stylesheet" href="style.css"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
@@ -26,7 +26,7 @@
     <button id="homeBtn" class="home-nav-btn hidden" title="Back to Home">
       <i class="fa-solid fa-house"></i> Home
     </button>
-    <button id="themeToggle" class="icon-btn"><i class="fa-solid fa-moon"></i></button>
+    <button id="themeToggle" class="icon-btn"><i class="fa-solid fa-sun"></i></button>
   </div>
 </header>
 
@@ -449,25 +449,23 @@
       <div id="imageFileInfo" class="tool-file-info hidden"></div>
 
       <div id="imageControls" class="tool-controls hidden">
-        <p class="panel-desc">Click <strong>Pick on Page</strong> then click the preview to position your image.</p>
+        <p class="panel-desc">Choose an image, then drag it onto the page preview. Move or resize it before embedding.</p>
         <div class="form-group"><label>Image File (PNG or JPEG)</label>
           <input type="file" id="overlayImageInput" accept="image/png,image/jpeg" class="input file-input"/>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>Page #</label><input type="number" id="imgPage" min="1" value="1" class="input"/></div>
-          <div class="form-group" style="justify-content:flex-end"><label>&nbsp;</label>
-            <button id="imgPickBtn" class="btn-secondary pick-btn"><i class="fa-solid fa-crosshairs"></i> Pick on Page</button>
-          </div>
+        <div id="imgThumbWrap" class="img-drag-thumb-wrap hidden">
+          <img id="imgDragThumb" class="img-drag-thumb" draggable="true" alt="Drag onto the page"/>
+          <span class="hint">Drag this onto the page preview</span>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>X</label><input type="number" id="imgX" value="50" class="input"/></div>
-          <div class="form-group"><label>Y</label><input type="number" id="imgY" value="50" class="input"/></div>
+        <div class="wm-hint">
+          <i class="fa-solid fa-hand-pointer"></i>
+          Drag the thumbnail onto the page, or click the page to drop it there · Drag corner to resize
         </div>
-        <div class="form-row">
-          <div class="form-group"><label>Width</label><input type="number" id="imgW" value="150" class="input"/></div>
-          <div class="form-group"><label>Height</label><input type="number" id="imgH" value="100" class="input"/></div>
+        <button id="addImageBtn" class="btn-action" disabled><i class="fa-solid fa-plus"></i> Embed Image on Page</button>
+        <div class="wm-undo-row">
+          <button id="imgUndoBtn" class="btn-secondary" disabled><i class="fa-solid fa-rotate-left"></i> Undo Last</button>
+          <button id="imgClearBtn" class="btn-secondary btn-danger-soft" disabled><i class="fa-solid fa-trash"></i> Remove All</button>
         </div>
-        <button id="addImageBtn" class="btn-action"><i class="fa-solid fa-plus"></i> Embed Image</button>
       </div>
     </div>
 
@@ -683,16 +681,34 @@
       <div id="signatureFileInfo" class="tool-file-info hidden"></div>
 
       <div id="signatureControls" class="tool-controls hidden">
-        <p class="panel-desc">Draw your signature below, then drag it onto the page preview.</p>
-        <div class="sig-canvas-wrap"><canvas id="sigCanvas" width="500" height="160"></canvas></div>
-        <div class="sig-toolbar">
-          <div class="form-group inline"><label>Color</label><input type="color" id="sigColor" value="#000000" class="input color-input small"/></div>
-          <div class="form-group inline"><label>Stroke</label><input type="range" id="sigStroke" min="1" max="10" value="2" class="range-input"/></div>
-          <button id="clearSig" class="btn-secondary"><i class="fa-solid fa-eraser"></i> Clear</button>
+        <div class="tab-row">
+          <button class="tab-btn active" data-sigtab="draw">Draw</button>
+          <button class="tab-btn" data-sigtab="upload">Upload Image</button>
         </div>
+
+        <div id="sigDrawTab">
+          <div class="sig-canvas-wrap"><canvas id="sigCanvas" width="500" height="160"></canvas></div>
+          <div class="sig-toolbar">
+            <div class="form-group inline"><label>Color</label><input type="color" id="sigColor" value="#000000" class="input color-input small"/></div>
+            <div class="form-group inline"><label>Stroke</label><input type="range" id="sigStroke" min="1" max="10" value="2" class="range-input"/></div>
+            <button id="clearSig" class="btn-secondary"><i class="fa-solid fa-eraser"></i> Clear</button>
+          </div>
+        </div>
+
+        <div id="sigUploadTab" class="hidden">
+          <div class="form-group"><label>Signature Image (PNG with transparent background works best)</label>
+            <input type="file" id="sigImageInput" accept="image/png,image/jpeg" class="input file-input"/>
+          </div>
+        </div>
+
+        <div id="sigDragWrap" class="img-drag-thumb-wrap hidden">
+          <img id="sigDragThumb" class="img-drag-thumb sig-drag-thumb" draggable="true" alt="Drag your signature onto the page"/>
+          <span class="hint">Drag onto the page, or click the page to drop it there</span>
+        </div>
+
         <div class="wm-hint">
           <i class="fa-solid fa-hand-pointer"></i>
-          Click the preview to place signature · Drag to move · Drag corner to resize
+          Drag your signature onto the page · Drag corner to resize
         </div>
         <button id="addSigBtn" class="btn-action" disabled><i class="fa-solid fa-plus"></i> Embed Signature on Page</button>
         <div class="wm-undo-row">
@@ -872,10 +888,11 @@
       <canvas id="wmPreviewCanvas" class="wm-preview-canvas"></canvas>
       <div id="textBoxLayer"></div>
       <div id="sigPlacementLayer"></div>
+      <div id="imgPlacementLayer"></div>
       <div id="redactLayer"></div>
     </div>
     <div class="preview-footer" id="previewFooter">
-      <button id="downloadBtn" class="download-btn" disabled>
+      <button id="downloadBtn2" class="download-btn" disabled>
         <i class="fa-solid fa-download"></i> Download PDF
       </button>
     </div>
