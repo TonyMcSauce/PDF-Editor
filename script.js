@@ -112,7 +112,7 @@ $('themeToggle').addEventListener('click', () => {
 function showHome() {
   show($('homeScreen')); hide($('editorScreen'));
   hide($('homeBtn'));
-  exitAnnotateMode(); exitRedactMode();
+  deactivateAllLayerTools();
 }
 function showEditor(tool) {
   hide($('homeScreen')); show($('editorScreen'));
@@ -125,11 +125,38 @@ document.querySelectorAll('.tool-card').forEach(card => {
   card.addEventListener('click', () => showEditor(card.dataset.tool));
 });
 
-/* ── PANEL ACTIVATION ── */
+/* ── PANEL ACTIVATION ──
+   Single source of truth for every tool that owns a persistent overlay
+   layer on top of the preview canvas (text boxes, watermark preview,
+   signature/image placement boxes, annotation strokes, redaction boxes).
+   Every one of those layers is a shared, always-present DOM element —
+   only the underlying canvas swaps per tool — so if a layer's cleanup
+   only ran on a direct sidebar click, entering that tool any other way
+   (a home-screen card, or returning from Home) skipped cleanup entirely
+   and left it sitting on top of whatever you opened next, still capturing
+   clicks. LAYER_TOOLS + activatePanel is the fix: it runs exit() on every
+   layer tool that ISN'T the one being entered, every single time, no
+   matter how the user navigated there. */
+const LAYER_TOOLS = {
+  annotate:  { enter: enterAnnotateMode, exit: exitAnnotateMode },
+  redact:    { enter: enterRedactMode,   exit: exitRedactMode },
+  text:      { enter: tbEnter,           exit: tbExit },
+  watermark: { enter: wmActivate,        exit: wmDeactivate },
+  signature: { enter: sigActivate,       exit: sigDeactivate },
+  image:     { enter: imgActivate,       exit: imgDeactivate },
+};
+function deactivateAllLayerTools() {
+  Object.values(LAYER_TOOLS).forEach(h => h.exit());
+}
+
 function activatePanel(name) {
   S.activeTool = name;
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.panel === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${name}`));
+
+  // Exit every layer tool except the one we're entering — the single
+  // cleanup pass that fixes the "old box/text/image stuck on top" bug.
+  Object.entries(LAYER_TOOLS).forEach(([toolName, h]) => { if (toolName !== name) h.exit(); });
 
   if (S.pages.length) {
     S.curPage = Math.max(1, Math.min(S.curPage, S.totalPages));
@@ -143,9 +170,9 @@ function activatePanel(name) {
 
   if (name === 'pages' && S.pages.length) renderGrid();
   if (name === 'merge') refreshMergePreview();
-  if (name === 'annotate' && S.pages.length) enterAnnotateMode(); else exitAnnotateMode();
-  if (name === 'redact'   && S.pages.length) enterRedactMode();   else exitRedactMode();
-  if (typeof tbCheckEnter === 'function') tbCheckEnter();
+
+  const handlers = LAYER_TOOLS[name];
+  if (handlers && S.pages.length) handlers.enter();
 }
 
 document.querySelectorAll('.tool-btn').forEach(btn => {
@@ -1031,12 +1058,6 @@ document.addEventListener('mousedown', e => {
   tbDeselect();
 });
 
-document.querySelectorAll('.tool-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.panel !== 'text') tbExit();
-  });
-});
-
 $('addTextBtn').addEventListener('click', async () => {
   const pages = S.toolPages['text'];
   if (!pages?.length) return;
@@ -1222,16 +1243,6 @@ function imgDeactivate() {
   $('imgPlacementLayer').innerHTML = '';
   $('addImageBtn').disabled = true;
 }
-
-document.querySelectorAll('.tool-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.panel === 'image') {
-      setTimeout(() => { if (S.toolPages['image']?.length) imgActivate(); }, 50);
-    } else {
-      imgDeactivate();
-    }
-  });
-});
 
 // ── Real drag-and-drop from the thumbnail onto the page preview ──
 const imgThumb = $('imgDragThumb');
@@ -1467,18 +1478,6 @@ function wmDeactivate() {
   const ctx = wmc.getContext('2d');
   ctx.clearRect(0, 0, wmc.width, wmc.height);
 }
-
-document.querySelectorAll('.tool-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.panel === 'watermark') {
-      setTimeout(() => {
-        if (S.toolPages['watermark']?.length) wmActivate();
-      }, 100);
-    } else {
-      wmDeactivate();
-    }
-  });
-});
 
 function wmUpdateUndoBtns() {
   const pages   = S.toolPages['watermark'] || [];
@@ -2026,25 +2025,6 @@ function sigDeactivate() {
   $('addSigBtn').disabled = true;
 }
 
-document.querySelectorAll('.tool-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.panel === 'signature') {
-      setTimeout(() => { if (S.toolPages['signature']?.length) sigActivate(); }, 50);
-    } else {
-      sigDeactivate();
-    }
-  });
-});
-
-(function() {
-  const obs = new MutationObserver(() => {
-    if (!$('signatureControls').classList.contains('hidden') && S.activeTool === 'signature' && !SIG.active) {
-      sigActivate();
-    }
-  });
-  obs.observe($('signatureControls'), { attributes:true, attributeFilter:['class'] });
-})();
-
 /* ── Real drag-and-drop from the sig chip onto the page preview ── */
 $('sigDragThumb').addEventListener('dragstart', e => {
   e.dataTransfer.effectAllowed = 'copy';
@@ -2475,4 +2455,4 @@ document.querySelectorAll('.tool-card').forEach(card => {
 
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v7.2 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v7.3 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
