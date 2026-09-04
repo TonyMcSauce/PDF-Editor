@@ -32,25 +32,28 @@
 html { font-size:15px }
 body { font-family:var(--body); background:var(--bg); color:var(--text);
   height:100vh; display:flex; flex-direction:column; overflow:hidden;
-  transition:background var(--tr),color var(--tr) }
+  transition:background-color .5s var(--smooth), color .35s var(--smooth) }
 ::-webkit-scrollbar { width:5px; height:5px }
 ::-webkit-scrollbar-track { background:transparent }
 ::-webkit-scrollbar-thumb { background:var(--border-lt); border-radius:3px }
 
-/* ── DARK MODE: gives it its own character instead of just "light mode,
-   inverted" — a faint top glow, a subtle grain texture for depth, and a
-   soft accent bloom around the logo. All disabled automatically for
-   prefers-reduced-motion / users who never touch dark mode at all. ── */
-[data-theme="dark"] body {
-  background:
-    radial-gradient(ellipse 1100px 550px at 50% -8%, rgba(79,142,247,.07), transparent 65%),
-    var(--bg);
-}
-[data-theme="dark"] body::before {
-  content:''; position:fixed; inset:0; pointer-events:none; z-index:1;
-  opacity:.035; mix-blend-mode:overlay;
+/* ── AMBIENT BACKGROUND: present in both themes so the accent glow +
+   grain texture cross-fade smoothly on toggle, rather than popping in/out
+   (a pseudo-element's existence can't be transitioned — only its opacity
+   can — so both layers always exist and just fade their opacity). ── */
+body { position:relative; isolation:isolate }
+body::before, body::after { content:''; position:fixed; inset:0; pointer-events:none; opacity:0; transition:opacity .6s var(--smooth) }
+body::before {
+  z-index:1; mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
+body::after {
+  z-index:0;
+  background:radial-gradient(ellipse 1100px 550px at 50% -8%, rgba(79,142,247,.09), transparent 65%);
+}
+[data-theme="dark"] body::before { opacity:.035 }
+[data-theme="dark"] body::after  { opacity:1 }
+
 [data-theme="dark"] .tool-card,
 [data-theme="dark"] .sidebar,
 [data-theme="dark"] .panel-area,
@@ -61,11 +64,35 @@ body { font-family:var(--body); background:var(--bg); color:var(--text);
   filter: drop-shadow(0 0 6px rgba(79,142,247,.55));
 }
 
+/* Preview area gets its own quiet ambient wash in dark mode — kept
+   static (no motion) since this is the workspace you're actively
+   reading/editing a real document in; drifting light behind the page
+   would be a distraction here rather than a nice touch. */
+[data-theme="dark"] .preview-area {
+  background:
+    radial-gradient(900px 500px at 25% 15%, rgba(79,142,247,.05), transparent 60%),
+    radial-gradient(700px 500px at 85% 85%, rgba(167,139,250,.04), transparent 60%),
+    var(--bg);
+}
+
 /* ── HEADER ── */
 .app-header {
   height:var(--hh); background:var(--surface); border-bottom:1px solid var(--border);
   display:flex; align-items:center; justify-content:space-between;
   padding:0 20px; flex-shrink:0; z-index:200;
+}
+
+/* Smooth theme cross-fade for the big plain surfaces that had no
+   color transition at all before — sidebar, panel rail, preview
+   area, header, upload zones, etc. all used to snap instantly when
+   switching light/dark; now they fade together like everything else. */
+.app-header, .sidebar, .panel-area, .preview-area, .home-screen,
+.preview-header, .preview-footer, .sidebar-bottom,
+.tool-upload-zone, .tool-file-info, .merge-preview-block,
+.loading-box, .toast, .compress-opt, .page-thumb,
+.annotate-tool-btn, .tab-btn, .text-toolbar, .tb-float-bar,
+.server-notice, .convert-status {
+  transition: background-color .45s var(--smooth), border-color .4s var(--smooth), color .3s var(--smooth), box-shadow .4s var(--smooth);
 }
 .header-left { display:flex; align-items:center; gap:16px }
 .header-right { display:flex; align-items:center; gap:8px }
@@ -132,7 +159,8 @@ body { font-family:var(--body); background:var(--bg); color:var(--text);
   padding:20px 18px; cursor:pointer;
   display:flex; align-items:flex-start; gap:14px;
   position:relative; overflow:hidden;
-  transition:transform .25s var(--spring), border-color .2s ease, box-shadow .25s ease;
+  transition:transform .25s var(--spring), border-color .2s ease, box-shadow .25s ease,
+             background-color .45s var(--smooth);
 }
 .tool-card::before {
   content:''; position:absolute; inset:0;
@@ -256,7 +284,8 @@ body { font-family:var(--body); background:var(--bg); color:var(--text);
 .input {
   background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
   color:var(--text); font-family:var(--body); font-size:.86rem;
-  padding:8px 10px; width:100%; outline:none; transition:border-color var(--tr);
+  padding:8px 10px; width:100%; outline:none;
+  transition:border-color var(--tr), background-color .4s var(--smooth), color .3s var(--smooth);
 }
 .input:focus { border-color:var(--accent) }
 select.input { cursor:pointer }
@@ -294,7 +323,7 @@ select.input { cursor:pointer }
 .btn-action:hover:not(:disabled) { background:var(--accent-h); transform:translateY(-1px); box-shadow:0 4px 16px -4px color-mix(in srgb, var(--accent) 50%, transparent) }
 .btn-action:active:not(:disabled) { transform:scale(.96) }
 .btn-action:disabled { opacity:.4; cursor:not-allowed }
-.btn-action, .btn-primary, .download-btn { transition:background var(--tr), transform .12s var(--spring), box-shadow .2s ease }
+.btn-action, .btn-primary, .download-btn { transition:background-color .4s var(--smooth), transform .12s var(--spring), box-shadow .2s ease, color .3s var(--smooth) }
 .btn-primary:active:not(:disabled), .download-btn:active:not(:disabled) { transform:scale(.96) }
 
 .btn-secondary {
