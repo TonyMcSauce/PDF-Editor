@@ -2132,6 +2132,14 @@ $('sigClearBtn').addEventListener('click', async () => {
 
 /* ── SERVER_URL (shared by security + conversions) ── */
 const SERVER_URL = 'https://pdf-studio-server-1.onrender.com';
+// Optional — only matters if you set API_KEY as an env var on the Render
+// server too. Leave both blank to keep the server open (fine for personal
+// use). See the honesty note in server.js about what this gate actually
+// protects against before relying on it for anything sensitive.
+const API_KEY = '';
+function apiHeaders(extra = {}) {
+  return API_KEY ? { ...extra, 'X-API-Key': API_KEY } : extra;
+}
 
 function mkTimeout(ms) {
   if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
@@ -2176,6 +2184,7 @@ $('applyPwdBtn').addEventListener('click', async () => {
 
     const res = await fetch(`${SERVER_URL}/encrypt`, {
       method: 'POST', body: formData, mode: 'cors',
+      headers: apiHeaders(),
       signal: mkTimeout(90000),
     });
 
@@ -2255,6 +2264,7 @@ $('applyUnlockBtn').addEventListener('click', async () => {
 
     const res = await fetch(`${SERVER_URL}/decrypt`, {
       method: 'POST', body: formData, mode: 'cors',
+      headers: apiHeaders(),
       signal: mkTimeout(90000),
     });
 
@@ -2404,6 +2414,7 @@ $('downloadBtn2')?.addEventListener('click', doDownload);
             method: 'POST',
             body:   formData,
             mode:   'cors',
+            headers: apiHeaders(),
             signal: AbortSignal.timeout(180000),
           });
           break;
@@ -2468,4 +2479,4 @@ document.querySelectorAll('.tool-card').forEach(card => {
 
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v7.4 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v7.5 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
