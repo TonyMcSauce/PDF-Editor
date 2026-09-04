@@ -697,8 +697,12 @@ select.input { cursor:pointer }
   z-index:20; box-shadow:0 1px 4px rgba(0,0,0,.35);
 }
 #imgPlacementLayer, #sigPlacementLayer {
-  position:absolute; z-index:150;
+  /* Same pattern as #textBoxLayer: pointer-events off by default so an
+     inactive layer can never intercept a click meant for whichever tool
+     actually IS active, no matter what leftover size/DOM order exists. */
+  position:absolute; z-index:150; pointer-events:none;
 }
+#imgPlacementLayer.active, #sigPlacementLayer.active { pointer-events:all }
 .placement-box { pointer-events:all }
 .preview-canvas-wrap.dragover-target { outline:2px dashed var(--accent); outline-offset:-2px }
 
