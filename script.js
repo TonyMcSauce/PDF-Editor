@@ -165,6 +165,7 @@ function activatePanel(name) {
   } else {
     hide($('previewCanvas')); show($('previewPlaceholder'));
     $('pageIndicator').textContent = '— / —';
+    $('zoomIn').disabled = true; $('zoomOut').disabled = true;
     updateDownloadBtn();
   }
 
@@ -418,6 +419,8 @@ function updateNav() {
   $('pageIndicator').textContent = S.totalPages ? `${S.curPage} / ${S.totalPages}` : '— / —';
   $('prevPage').disabled = !S.totalPages || S.curPage <= 1;
   $('nextPage').disabled = !S.totalPages || S.curPage >= S.totalPages;
+  $('zoomIn').disabled  = !S.totalPages;
+  $('zoomOut').disabled = !S.totalPages;
 }
 function updateDownloadBtn() {
   const on = !!S.pages.length;
@@ -1228,6 +1231,7 @@ function imgSyncLayerPos() {
 function imgActivate() {
   IMGOV.active = true;
   imgSyncLayerPos();
+  $('imgPlacementLayer').classList.add('active');
   imgUpdateBtns();
   $('imgPlacementLayer').addEventListener('click', imgLayerClick);
 }
@@ -1240,7 +1244,12 @@ function imgLayerClick(e) {
 function imgDeactivate() {
   IMGOV.active = false;
   IMGOV.boxEl  = null;
-  $('imgPlacementLayer').innerHTML = '';
+  const layer = $('imgPlacementLayer');
+  layer.classList.remove('active');
+  layer.removeEventListener('click', imgLayerClick);
+  layer.innerHTML = '';
+  layer.style.width = '0px';
+  layer.style.height = '0px';
   $('addImageBtn').disabled = true;
 }
 
@@ -2020,8 +2029,12 @@ function sigLayerClick(e) {
 function sigDeactivate() {
   SIG.active = false;
   SIG.boxEl  = null;
-  $('sigPlacementLayer').classList.remove('active');
-  $('sigPlacementLayer').innerHTML = '';
+  const layer = $('sigPlacementLayer');
+  layer.classList.remove('active');
+  layer.removeEventListener('click', sigLayerClick);
+  layer.innerHTML = '';
+  layer.style.width = '0px';
+  layer.style.height = '0px';
   $('addSigBtn').disabled = true;
 }
 
@@ -2455,4 +2468,4 @@ document.querySelectorAll('.tool-card').forEach(card => {
 
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v7.3 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v7.4 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
