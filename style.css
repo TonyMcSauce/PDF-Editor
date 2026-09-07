@@ -1,4 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=DM+Sans:wght@300;400;500;600&display=swap');
+/* Fonts are loaded via <link> in index.html's <head> now, not @import here —
+   @import is render-blocking but loads AFTER the browser starts parsing the
+   rest of this file, so the page briefly rendered in fallback fonts and
+   reflowed once the real ones arrived. A <link> loads earlier and avoids
+   that flash/shift entirely. */
 
 :root {
   --bg:#0a0c12; --bg2:#0f1219;
