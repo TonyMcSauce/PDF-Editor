@@ -207,8 +207,11 @@ function wirePdfUpload({ toolName, inputId, zoneId, infoId, controlsId }) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const doc   = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      // sourceBytes travels with every page so the vector export engine can
+      // re-open the ORIGINAL PDF (real text/vectors intact) instead of
+      // rasterizing a canvas snapshot of it — see buildPdfVector().
       S.toolPages[toolName] = Array.from({ length: doc.numPages }, (_, i) => ({
-        pdfJsDoc: doc, pageNum: i + 1, rotation: 0, overlays: [],
+        pdfJsDoc: doc, pageNum: i + 1, rotation: 0, overlays: [], sourceBytes: bytes,
       }));
       info.innerHTML = `
         <i class="fa-solid fa-file-pdf fi-icon"></i>
@@ -467,7 +470,11 @@ function setPlaceMode(mode, btnId) {
   } else { clearPlacementOverlay(); }
 }
 
-/* ── BUILD PDF ── */
+/* ── BUILD PDF (RASTERIZED) ──
+   Kept intentionally for Compress ONLY — that tool's entire job is to
+   reduce file size by re-encoding page content as compressed JPEG, so
+   rasterizing here is correct, expected behavior, not a shortcut. Every
+   other tool now uses buildPdfVector() below instead. ── */
 async function buildPdf(pageDescs, quality = 0.92) {
   const doc = await PDFLib.PDFDocument.create();
   for (let i = 0; i < pageDescs.length; i++) {
@@ -483,6 +490,181 @@ async function buildPdf(pageDescs, quality = 0.92) {
   return doc.save();
 }
 
+/* ══════════════════════════════════════════════════════════════
+   BUILD PDF (VECTOR) — non-destructive PDF export
+   ══════════════════════════════════════════════════════════════
+   The old buildPdf() above photographs every page onto a canvas and
+   re-embeds that photo as a JPEG — real text becomes a picture of text,
+   permanently, the moment you touch any tool. This is the fix: pages are
+   copied from the ORIGINAL uploaded bytes using pdf-lib's copyPages(),
+   which preserves the real text/vector content stream untouched. Only
+   genuinely NEW visual content you add (a signature, an uploaded image,
+   a watermark image) gets embedded as an image — which is correct and
+   unavoidable for that content, but it no longer drags the entire
+   underlying page down with it.
+
+   Known, deliberate gaps in this pass (see chat for the full reasoning):
+   - Annotate and Redact still use the old rasterizing buildPdf() above.
+     Redact in particular only ever painted a box over content, on the
+     canvas OR here — it does not remove the underlying text from the
+     PDF. That is a real security-relevant gap for anyone treating
+     "Redact" as if it guarantees removal, not just a missing feature —
+     see the follow-up note in chat for the correct fix.
+   - Watermark rotation math is included but not visually verified in
+     this environment (I cannot render a PDF to check it). If a rotated
+     watermark comes out mirrored/backwards after you test it, tell me
+     and it's a one-line sign flip to correct.
+   - Only the 14 standard PDF fonts exist without embedding real font
+     files. Georgia/Verdana/Impact fall back to the closest standard
+     match (Times/Helvetica/Helvetica-Bold) rather than rendering exactly
+     as they do in the live on-screen preview.
+   ══════════════════════════════════════════════════════════════ */
+
+function hexToRgb01(hex) {
+  hex = (hex || '#000000').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  const n = parseInt(hex, 16) || 0;
+  return PDFLib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+async function getPdfLibFont(doc, family, bold, italic) {
+  const { StandardFonts } = PDFLib;
+  const fam = (family || '').toLowerCase();
+  let key;
+  if (fam.includes('times') || fam.includes('georgia')) {
+    key = bold && italic ? StandardFonts.TimesRomanBoldItalic
+        : bold ? StandardFonts.TimesRomanBold
+        : italic ? StandardFonts.TimesRomanItalic
+        : StandardFonts.TimesRoman;
+  } else if (fam.includes('courier')) {
+    key = bold && italic ? StandardFonts.CourierBoldOblique
+        : bold ? StandardFonts.CourierBold
+        : italic ? StandardFonts.CourierOblique
+        : StandardFonts.Courier;
+  } else {
+    // Arial, Verdana, Impact, and anything unrecognized → closest
+    // standard match (Helvetica family). No exact substitute exists
+    // without embedding real font files (a future improvement).
+    key = bold && italic ? StandardFonts.HelveticaBoldOblique
+        : bold ? StandardFonts.HelveticaBold
+        : italic ? StandardFonts.HelveticaOblique
+        : StandardFonts.Helvetica;
+  }
+  doc.__fontCache = doc.__fontCache || {};
+  if (!doc.__fontCache[key]) doc.__fontCache[key] = await doc.embedFont(key);
+  return doc.__fontCache[key];
+}
+
+// Re-encode an HTMLImageElement (uploaded file, or a drawn signature) as
+// PNG bytes for embedding. This IS a raster image being embedded — that's
+// correct and expected, it was always a raster image. What matters is
+// that embedding it no longer requires rasterizing the PAGE underneath it.
+function imgElToPngBytes(imgEl) {
+  const cv = document.createElement('canvas');
+  cv.width  = imgEl.naturalWidth  || imgEl.width  || 1;
+  cv.height = imgEl.naturalHeight || imgEl.height || 1;
+  cv.getContext('2d').drawImage(imgEl, 0, 0);
+  return dataUrlToBytes(cv.toDataURL('image/png'));
+}
+
+// Rotate a point (offsetX, offsetY) around (cx, cy) by angleDeg, returning
+// the absolute anchor pdf-lib needs so content rotates around its own
+// visual CENTER (matching how the canvas preview rotates watermarks)
+// rather than around pdf-lib's default bottom-left anchor point.
+function rotateAnchor(cx, cy, offsetX, offsetY, angleDeg) {
+  const rad = angleDeg * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  return { x: cx + offsetX * cos - offsetY * sin, y: cy + offsetX * sin + offsetY * cos };
+}
+
+async function drawOverlaysOnPdfPage(page, overlays, doc) {
+  if (!overlays?.length) return;
+  const { height: pageH } = page.getSize();
+
+  for (const o of overlays) {
+    if (o.type === 'text') {
+      const font = await getPdfLibFont(doc, o.font, o.bold, o.italic);
+      // Overlay coords are top-down "PDF units at scale 1" (matching
+      // pdf.js's viewport convention); o.y is the box TOP, and the
+      // canvas version drew the baseline at y+size — same rule here.
+      const baselineFromTop = o.y + o.size;
+      page.drawText(o.text || '', {
+        x: o.x, y: pageH - baselineFromTop,
+        size: o.size, font, color: hexToRgb01(o.color),
+      });
+
+    } else if (o.type === 'image' || o.type === 'signature') {
+      if (!o.imgEl) continue;
+      let embedded;
+      try { embedded = await doc.embedPng(imgElToPngBytes(o.imgEl)); }
+      catch (_) { continue; }
+      page.drawImage(embedded, { x: o.x, y: pageH - o.y - o.h, width: o.w, height: o.h });
+
+    } else if (o.type === 'pagenumber') {
+      const font = await getPdfLibFont(doc, 'Arial', false, false);
+      let x = o.x;
+      const tw = font.widthOfTextAtSize(o.text, o.size);
+      if (o.align === 'center') x -= tw / 2;
+      else if (o.align === 'right') x -= tw;
+      page.drawText(o.text, { x, y: pageH - o.y, size: o.size, font, color: hexToRgb01(o.color) });
+
+    } else if (o.type === 'watermark') {
+      const cx = o.xPdf, cy = pageH - o.yPdf;
+      const angleDeg = -(o.angle || 0); // see the rotation-sign caveat above
+      if (o.imgEl) {
+        let embedded;
+        try { embedded = await doc.embedPng(imgElToPngBytes(o.imgEl)); }
+        catch (_) { continue; }
+        const a = rotateAnchor(cx, cy, -o.w / 2, -o.h / 2, angleDeg);
+        page.drawImage(embedded, {
+          x: a.x, y: a.y, width: o.w, height: o.h,
+          opacity: o.opacity, rotate: PDFLib.degrees(angleDeg),
+        });
+      } else {
+        const font = await getPdfLibFont(doc, o.font, o.bold, o.italic);
+        const size = o.size || 60;
+        const tw = font.widthOfTextAtSize(o.text || '', size);
+        const a = rotateAnchor(cx, cy, -tw / 2, -size / 2, angleDeg);
+        page.drawText(o.text || '', {
+          x: a.x, y: a.y, size, font, color: hexToRgb01(o.color),
+          opacity: o.opacity, rotate: PDFLib.degrees(angleDeg),
+        });
+      }
+    }
+    // 'annotation' and 'redact' overlays are intentionally skipped here —
+    // see the header note above for why, and what the correct fix looks like.
+  }
+}
+
+async function buildPdfVector(pageDescs) {
+  const outDoc = await PDFLib.PDFDocument.create();
+  const srcDocCache = new Map();
+
+  async function getSrcDoc(bytes) {
+    if (!srcDocCache.has(bytes)) {
+      srcDocCache.set(bytes, await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true }));
+    }
+    return srcDocCache.get(bytes);
+  }
+
+  for (let i = 0; i < pageDescs.length; i++) {
+    loading(true, `Building PDF… ${i + 1} / ${pageDescs.length}`);
+    const desc = pageDescs[i];
+    if (!desc.sourceBytes) {
+      throw new Error('This page has no original file attached — try re-uploading the PDF for this tool.');
+    }
+    const srcDoc = await getSrcDoc(desc.sourceBytes);
+    const [copiedPage] = await outDoc.copyPages(srcDoc, [desc.pageNum - 1]);
+    outDoc.addPage(copiedPage);
+
+    if (desc.rotation) {
+      const cur = copiedPage.getRotation().angle || 0;
+      copiedPage.setRotation(PDFLib.degrees((cur + desc.rotation) % 360));
+    }
+    await drawOverlaysOnPdfPage(copiedPage, desc.overlays, outDoc);
+  }
+  return outDoc.save();
+}
+
 /* ── MERGE ── */
 async function addMergeFiles(files) {
   loading(true, 'Loading…');
@@ -492,7 +674,7 @@ async function addMergeFiles(files) {
       if (!okSize(f)) continue;
       const bytes = new Uint8Array(await f.arrayBuffer());
       const doc   = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-      S.mergeSources.push({ name: f.name, pdfJsDoc: doc, curPage: 1 });
+      S.mergeSources.push({ name: f.name, pdfJsDoc: doc, curPage: 1, bytes });
     }
     S._mergeViewIdx = Math.max(0, S.mergeSources.length - 1);
     refreshMergeList(); await refreshMergePreview();
@@ -548,8 +730,8 @@ $('mergeBtn').addEventListener('click', async () => {
   loading(true,'Merging…');
   try {
     const descs = S.mergeSources.flatMap(src =>
-      Array.from({length:src.pdfJsDoc.numPages},(_,i)=>({pdfJsDoc:src.pdfJsDoc,pageNum:i+1,rotation:0,overlays:[]})));
-    dlBytes(await buildPdf(descs), 'merged.pdf');
+      Array.from({length:src.pdfJsDoc.numPages},(_,i)=>({pdfJsDoc:src.pdfJsDoc,pageNum:i+1,rotation:0,overlays:[],sourceBytes:src.bytes})));
+    dlBytes(await buildPdfVector(descs), 'merged.pdf');
     toast(`Merged ${S.mergeSources.length} PDFs!`, 'success');
   } catch(e) { console.error(e); toast(`Merge failed: ${e.message}`, 'error'); }
   finally { loading(false); }
@@ -566,7 +748,7 @@ $('splitBtn').addEventListener('click', async () => {
   const from=parseInt($('splitFrom').value,10), to=parseInt($('splitTo').value,10);
   if (!Number.isFinite(from)||!Number.isFinite(to)||from<1||to>pages.length||from>to){toast('Invalid range.','error');return;}
   loading(true,'Splitting…');
-  try { dlBytes(await buildPdf(pages.slice(from-1,to)), `pages_${from}-${to}.pdf`); toast(`Pages ${from}–${to} extracted!`,'success'); }
+  try { dlBytes(await buildPdfVector(pages.slice(from-1,to)), `pages_${from}-${to}.pdf`); toast(`Pages ${from}–${to} extracted!`,'success'); }
   catch(e){ console.error(e); toast(`Split failed: ${e.message}`,'error'); }
   finally { loading(false); }
 });
@@ -1101,7 +1283,7 @@ $('addTextBtn').addEventListener('click', async () => {
 
   loading(true, 'Building PDF…');
   try {
-    dlBytes(await buildPdf(pages), 'text-edited.pdf');
+    dlBytes(await buildPdfVector(pages), 'text-edited.pdf');
     toast('✓ Text applied & downloaded!', 'success');
     tbClearAll();
   } catch(e) {
@@ -2168,7 +2350,7 @@ $('applyPwdBtn').addEventListener('click', async () => {
   loading(true, 'Building PDF…');
   let pdfBytes;
   try {
-    pdfBytes = await buildPdf(pages);
+    pdfBytes = await buildPdfVector(pages);
   } catch(e) {
     console.error(e);
     toast(`PDF build failed: ${e.message}`, 'error');
@@ -2294,7 +2476,20 @@ $('applyUnlockBtn').addEventListener('click', async () => {
 async function doDownload() {
   if(!S.pages.length)return;
   loading(true,'Building PDF…');
-  try{ dlBytes(await buildPdf(S.pages),'edited.pdf'); toast('Downloaded!','success'); }
+  try{
+    // Compress intentionally rasterizes. Annotate/Redact also stay on the
+    // rasterizing path for now — their overlay types aren't implemented
+    // in buildPdfVector() yet (see the header comment above it), so
+    // routing them through the vector engine would silently drop the
+    // annotation/redaction marks from the export rather than just being
+    // slower/heavier. Rasterizing here preserves what you actually drew.
+    const useRaster = S.activeTool === 'compress' || S.activeTool === 'annotate' || S.activeTool === 'redact';
+    const bytes = useRaster
+      ? await buildPdf(S.pages, S.activeTool === 'compress' ? S.compressQuality : 0.92)
+      : await buildPdfVector(S.pages);
+    dlBytes(bytes,'edited.pdf');
+    toast('Downloaded!','success');
+  }
   catch(e){ console.error(e); toast(`Failed: ${e.message}`,'error'); }
   finally{ loading(false); }
 }
@@ -2479,4 +2674,4 @@ document.querySelectorAll('.tool-card').forEach(card => {
 
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v7.5 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v8.0 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
