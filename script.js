@@ -110,19 +110,22 @@ $('themeToggle').addEventListener('click', () => {
 
 /* ── SCREEN SWITCHING ── */
 function showHome() {
-  show($('homeScreen')); hide($('editorScreen'));
+  show($('homeScreen')); hide($('editorScreen')); hide($('workspaceScreen'));
   hide($('homeBtn'));
   deactivateAllLayerTools();
 }
 function showEditor(tool) {
-  hide($('homeScreen')); show($('editorScreen'));
+  hide($('homeScreen')); hide($('workspaceScreen')); show($('editorScreen'));
   show($('homeBtn'));
   activatePanel(tool);
 }
 $('goHome').addEventListener('click', showHome);
 $('homeBtn').addEventListener('click', showHome);
 document.querySelectorAll('.tool-card').forEach(card => {
-  card.addEventListener('click', () => showEditor(card.dataset.tool));
+  card.addEventListener('click', () => {
+    if (card.dataset.tool === 'workspace') showWorkspace();
+    else showEditor(card.dataset.tool);
+  });
 });
 
 /* ── PANEL ACTIVATION ──
@@ -2672,6 +2675,300 @@ document.querySelectorAll('.tool-card').forEach(card => {
   });
 });
 
+/* ══════════════════════════════════════════════════════════════
+   WORKSPACE (BETA) — the new session-based editor.
+   One document, one shared Undo/Redo history, autosaved as you go.
+   Only Watermark and Page Numbers run on this model so far — everything
+   else stays on the classic per-tool flow above until it's migrated.
+   Reuses the existing renderPageToCanvas/drawOverlaysOnCanvas/buildPdfVector
+   functions directly, since WS page-desc objects share the exact same
+   {pdfJsDoc, pageNum, rotation, overlays} shape every other tool uses.
+══════════════════════════════════════════════════════════════ */
+
+/* ── Tiny IndexedDB wrapper for autosave (binary-safe, unlike localStorage) ── */
+const IDB_NAME = 'pdfStudioWorkspace', IDB_STORE = 'session';
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+async function idbPut(key, value) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+async function idbDelete(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  });
+}
+
+/* ── Session state ── */
+const WS = {
+  baseBytes: null,      // original PDF bytes — the single source of truth
+  pdfJsDoc: null,        // pdf.js doc parsed from baseBytes
+  pages: [],             // [{ pdfJsDoc, pageNum, rotation, overlays }]
+  filename: 'document.pdf',
+  curPage: 1,
+  history: [],           // snapshot stack — see wsCommit()
+  historyIndex: -1,
+  MAX_HISTORY: 30,
+  autosaveTimer: null,
+};
+
+function wsClonePages(pages) {
+  // Overlays here are pure data (text/number/string fields only — no
+  // imgEl) since this beta only supports text watermarks and page
+  // numbers, so a shallow per-overlay copy is fully safe and cheap.
+  return pages.map(p => ({
+    pdfJsDoc: p.pdfJsDoc, pageNum: p.pageNum, rotation: p.rotation,
+    overlays: p.overlays.map(o => ({ ...o })),
+  }));
+}
+
+function wsCommit(label) {
+  WS.history = WS.history.slice(0, WS.historyIndex + 1); // drop any redo branch
+  WS.history.push({ baseBytes: WS.baseBytes, pages: wsClonePages(WS.pages), filename: WS.filename, label });
+  if (WS.history.length > WS.MAX_HISTORY) WS.history.shift();
+  WS.historyIndex = WS.history.length - 1;
+  wsUpdateUndoRedoBtns();
+  wsScheduleAutosave();
+}
+
+function wsUpdateUndoRedoBtns() {
+  $('wsUndoBtn').disabled = WS.historyIndex <= 0;
+  $('wsRedoBtn').disabled = WS.historyIndex >= WS.history.length - 1;
+}
+
+function wsScheduleAutosave() {
+  clearTimeout(WS.autosaveTimer);
+  WS.autosaveTimer = setTimeout(wsAutosaveNow, 800);
+}
+async function wsAutosaveNow() {
+  if (!WS.baseBytes) return;
+  try {
+    await idbPut('current', {
+      baseBytes: WS.baseBytes,
+      pages: WS.pages.map(p => ({ pageNum: p.pageNum, rotation: p.rotation, overlays: p.overlays })),
+      filename: WS.filename, savedAt: Date.now(),
+    });
+    const el = $('wsAutosaveStatus');
+    if (el) el.textContent = 'Saved ' + new Date().toLocaleTimeString();
+  } catch (e) { console.error('[autosave]', e); }
+}
+
+async function wsRestoreSnapshot(snap) {
+  const baseChanged = snap.baseBytes !== WS.baseBytes;
+  WS.baseBytes = snap.baseBytes;
+  WS.filename  = snap.filename;
+  if (baseChanged || !WS.pdfJsDoc) {
+    WS.pdfJsDoc = await pdfjsLib.getDocument({ data: WS.baseBytes.slice() }).promise;
+  }
+  WS.pages = snap.pages.map(p => ({ pdfJsDoc: WS.pdfJsDoc, pageNum: p.pageNum, rotation: p.rotation, overlays: p.overlays.map(o => ({ ...o })) }));
+  WS.curPage = Math.max(1, Math.min(WS.curPage, WS.pages.length));
+}
+
+async function wsUndo() {
+  if (WS.historyIndex <= 0) return;
+  WS.historyIndex--;
+  await wsRestoreSnapshot(WS.history[WS.historyIndex]);
+  wsUpdateUndoRedoBtns();
+  await wsRenderPreview();
+  wsScheduleAutosave();
+}
+async function wsRedo() {
+  if (WS.historyIndex >= WS.history.length - 1) return;
+  WS.historyIndex++;
+  await wsRestoreSnapshot(WS.history[WS.historyIndex]);
+  wsUpdateUndoRedoBtns();
+  await wsRenderPreview();
+  wsScheduleAutosave();
+}
+$('wsUndoBtn').addEventListener('click', wsUndo);
+$('wsRedoBtn').addEventListener('click', wsRedo);
+
+/* ── Open a PDF into the session ── */
+async function wsOpenFile(file) {
+  if (!file || file.type !== 'application/pdf') { toast('Please select a valid PDF.', 'error'); return; }
+  if (!okSize(file)) return;
+  loading(true, 'Opening PDF…');
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const doc   = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    WS.baseBytes = bytes;
+    WS.pdfJsDoc  = doc;
+    WS.pages     = Array.from({ length: doc.numPages }, (_, i) => ({ pdfJsDoc: doc, pageNum: i + 1, rotation: 0, overlays: [] }));
+    WS.filename  = file.name;
+    WS.curPage   = 1;
+    WS.history = []; WS.historyIndex = -1;
+    wsCommit('Open document');
+    show($('wsWorkspaceMain')); hide($('wsEmptyState'));
+    $('wsFilename').textContent = file.name;
+    $('wsExportBtn').disabled = false;
+    await wsRenderPreview();
+    toast(`Opened "${file.name}" — ${doc.numPages} pages`, 'success');
+  } catch (e) { console.error(e); toast(`Failed to open: ${e.message}`, 'error'); }
+  finally { loading(false); }
+}
+$('wsOpenBtn').addEventListener('click', () => $('wsFileInput').click());
+$('wsFileInput').addEventListener('change', e => { if (e.target.files[0]) wsOpenFile(e.target.files[0]); e.target.value = ''; });
+
+/* ── Preview (reuses the same canvas renderer every other tool uses) ── */
+async function wsRenderPreview() {
+  if (!WS.pages.length) return;
+  const desc = WS.pages[WS.curPage - 1];
+  const { canvas } = await renderPageToCanvas(desc, 1.4);
+  const cv = $('wsPreviewCanvas');
+  cv.width = canvas.width; cv.height = canvas.height;
+  cv.getContext('2d').drawImage(canvas, 0, 0);
+  show(cv); hide($('wsPreviewPlaceholder'));
+  $('wsPageIndicator').textContent = `${WS.curPage} / ${WS.pages.length}`;
+  $('wsPrevPage').disabled = WS.curPage <= 1;
+  $('wsNextPage').disabled = WS.curPage >= WS.pages.length;
+}
+$('wsPrevPage').addEventListener('click', () => { if (WS.curPage > 1) { WS.curPage--; wsRenderPreview(); } });
+$('wsNextPage').addEventListener('click', () => { if (WS.curPage < WS.pages.length) { WS.curPage++; wsRenderPreview(); } });
+
+/* ── Tab switching (Watermark / Page Numbers) ── */
+document.querySelectorAll('.ws-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ws-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.ws-panel').forEach(p => p.classList.toggle('active', p.id === `wspanel-${btn.dataset.wstab}`));
+  });
+});
+
+/* ── Apply Watermark (text-only in this beta) ── */
+$('wsWmOpacity').addEventListener('input', () => { $('wsWmOpacityVal').textContent = $('wsWmOpacity').value + '%'; });
+$('wsApplyWatermarkBtn').addEventListener('click', async () => {
+  if (!WS.pages.length) return;
+  const text = $('wsWmText').value.trim();
+  if (!text) { toast('Enter watermark text.', 'error'); return; }
+
+  const fracMap = {
+    center: [.5, .5], 'top-left': [.15, .12], 'top-right': [.85, .12],
+    'bottom-left': [.15, .88], 'bottom-right': [.85, .88],
+  };
+  const [xFrac, yFrac] = fracMap[$('wsWmPosition').value] || [.5, .5];
+  const base = {
+    type: 'watermark', text,
+    size: +$('wsWmSize').value || 60,
+    color: $('wsWmColor').value || '#000000',
+    font: 'Arial', bold: false, italic: false,
+    opacity: (+$('wsWmOpacity').value) / 100,
+    angle: +$('wsWmAngle').value || 0,
+  };
+
+  loading(true, 'Applying watermark…');
+  try {
+    for (const p of WS.pages) {
+      const pdfPage = await p.pdfJsDoc.getPage(p.pageNum);
+      const vp = pdfPage.getViewport({ scale: 1 });
+      p.overlays.push({ ...base, xFrac, yFrac, xPdf: xFrac * vp.width, yPdf: yFrac * vp.height });
+    }
+    wsCommit('Apply watermark');
+    await wsRenderPreview();
+    toast('Watermark applied to all pages!', 'success');
+  } finally { loading(false); }
+});
+
+/* ── Apply Page Numbers ── */
+$('wsApplyPageNumBtn').addEventListener('click', async () => {
+  if (!WS.pages.length) return;
+  loading(true, 'Adding page numbers…');
+  try {
+    const pos = $('wsPnPosition').value, start = parseInt($('wsPnStart').value, 10) || 1;
+    const size = +$('wsPnSize').value || 14, color = $('wsPnColor').value, fmt = $('wsPnFormat').value;
+    const total = WS.pages.length;
+    for (let i = 0; i < WS.pages.length; i++) {
+      const p = WS.pages[i], n = i + start;
+      const text = fmt === 'n' ? `${n}` : fmt === 'of' ? `${n} of ${total}` : fmt === 'dash' ? `— ${n} —` : `Page ${n}`;
+      const pdfPage = await p.pdfJsDoc.getPage(p.pageNum);
+      const rot = (pdfPage.getViewport({ scale: 1 }).rotation + p.rotation) % 360;
+      const vp  = pdfPage.getViewport({ scale: 1, rotation: rot });
+      const W = vp.width, H = vp.height, pad = 20;
+      let x, y, align = 'center';
+      if      (pos === 'bottom-center') { x = W/2;   y = H-pad;    align = 'center'; }
+      else if (pos === 'bottom-right')  { x = W-pad; y = H-pad;    align = 'right';  }
+      else if (pos === 'bottom-left')   { x = pad;   y = H-pad;    align = 'left';   }
+      else if (pos === 'top-center')    { x = W/2;   y = pad+size; align = 'center'; }
+      else if (pos === 'top-right')     { x = W-pad; y = pad+size; align = 'right';  }
+      else                              { x = pad;   y = pad+size; align = 'left';   }
+      p.overlays.push({ type: 'pagenumber', text, size, color, x, y, align });
+    }
+    wsCommit('Add page numbers');
+    await wsRenderPreview();
+    toast('Page numbers added!', 'success');
+  } finally { loading(false); }
+});
+
+/* ── Export (reuses buildPdfVector — same non-destructive engine as
+   every migrated tool; sourceBytes is just WS.baseBytes for every page) ── */
+$('wsExportBtn').addEventListener('click', async () => {
+  if (!WS.pages.length) return;
+  loading(true, 'Building PDF…');
+  try {
+    const descs = WS.pages.map(p => ({ ...p, sourceBytes: WS.baseBytes }));
+    const bytes = await buildPdfVector(descs);
+    dlBytes(bytes, WS.filename.replace(/\.pdf$/i, '') + '-edited.pdf');
+    toast('Downloaded!', 'success');
+  } catch (e) { console.error(e); toast(`Export failed: ${e.message}`, 'error'); }
+  finally { loading(false); }
+});
+
+/* ── Entry point + resume-session prompt ── */
+async function showWorkspace() {
+  hide($('homeScreen')); hide($('editorScreen')); show($('workspaceScreen'));
+  deactivateAllLayerTools();
+  if (!WS.baseBytes) await wsCheckResume();
+}
+$('wsHomeBtn').addEventListener('click', showHome);
+
+async function wsCheckResume() {
+  try {
+    const saved = await idbGet('current');
+    if (!saved?.baseBytes) return;
+    const when = saved.savedAt ? new Date(saved.savedAt).toLocaleString() : 'earlier';
+    if (!confirm(`Resume your previous session ("${saved.filename}", autosaved ${when})?`)) {
+      await idbDelete('current');
+      return;
+    }
+    WS.baseBytes = saved.baseBytes;
+    WS.pdfJsDoc  = await pdfjsLib.getDocument({ data: WS.baseBytes.slice() }).promise;
+    WS.pages     = saved.pages.map(p => ({ pdfJsDoc: WS.pdfJsDoc, pageNum: p.pageNum, rotation: p.rotation, overlays: p.overlays }));
+    WS.filename  = saved.filename;
+    WS.curPage   = 1;
+    WS.history = [{ baseBytes: WS.baseBytes, pages: wsClonePages(WS.pages), filename: WS.filename, label: 'Resumed' }];
+    WS.historyIndex = 0;
+    show($('wsWorkspaceMain')); hide($('wsEmptyState'));
+    $('wsFilename').textContent = WS.filename;
+    $('wsExportBtn').disabled = false;
+    await wsRenderPreview();
+    wsUpdateUndoRedoBtns();
+    toast('Session resumed.', 'success');
+  } catch (e) { console.error('[resume check]', e); }
+}
+
 /* ── INIT ── */
 showHome();
-console.log('%c PDF Studio v8.0 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
+console.log('%c PDF Studio v8.1 ','background:#4f8ef7;color:#fff;font-size:1rem;padding:3px 12px;border-radius:4px');
