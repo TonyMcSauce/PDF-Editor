@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>PDF Studio v8.0 - All-in-One PDF Editor</title>
+  <title>PDF Studio v8.1 - All-in-One PDF Editor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=DM+Sans:wght@300;400;500;600&display=swap"/>
-  <link rel="stylesheet" href="style.css?v=8.0"/>
+  <link rel="stylesheet" href="style.css?v=8.1"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
@@ -134,6 +134,15 @@
       <div class="tool-card-icon" style="--c:#c43e1c"><i class="fa-solid fa-file-powerpoint"></i></div>
       <div class="tool-card-text"><h3>PDF to PowerPoint <span class="server-badge">Server</span></h3><p>Convert PDF slides into editable PPTX</p></div>
     </div>
+
+    <!-- NEW SESSION-BASED ARCHITECTURE — separate from the tools above on
+         purpose. This is where Undo/Redo, autosave, and (soon) true text
+         editing live. Everything above stays exactly as it is until each
+         tool gets migrated onto this model one at a time. -->
+    <div class="tool-card tool-card-beta" data-tool="workspace">
+      <div class="tool-card-icon" style="--c:#22c55e"><i class="fa-solid fa-layer-group"></i></div>
+      <div class="tool-card-text"><h3>Workspace <span class="beta-badge">Beta</span></h3><p>One document, real Undo/Redo, autosave — Watermark &amp; Page Numbers so far</p></div>
+    </div>
   </div>
 
   <p class="home-note">
@@ -143,7 +152,120 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
-<!-- EDITOR SCREEN                                  -->
+<!-- WORKSPACE (BETA) — session-based editor          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="workspaceScreen" class="editor-screen hidden">
+  <header class="ws-topbar">
+    <button id="wsHomeBtn" class="home-nav-btn"><i class="fa-solid fa-house"></i> Home</button>
+    <div class="ws-topbar-file">
+      <i class="fa-solid fa-file-pdf"></i>
+      <span id="wsFilename">No document open</span>
+    </div>
+    <div class="ws-topbar-actions">
+      <button id="wsOpenBtn" class="btn-secondary"><i class="fa-solid fa-folder-open"></i> Open PDF</button>
+      <input type="file" id="wsFileInput" accept="application/pdf" hidden/>
+      <button id="wsUndoBtn" class="icon-btn" disabled title="Undo"><i class="fa-solid fa-rotate-left"></i></button>
+      <button id="wsRedoBtn" class="icon-btn" disabled title="Redo"><i class="fa-solid fa-rotate-right"></i></button>
+      <span id="wsAutosaveStatus" class="ws-autosave-status"></span>
+      <button id="wsExportBtn" class="btn-action" style="width:auto;margin:0" disabled><i class="fa-solid fa-download"></i> Export</button>
+    </div>
+  </header>
+
+  <main class="app-layout">
+    <aside class="sidebar">
+      <nav class="tool-nav">
+        <span class="nav-section-label">Edit</span>
+        <button class="tool-btn ws-tab active" data-wstab="watermark"><i class="fa-solid fa-stamp"></i><span>Watermark</span></button>
+        <button class="tool-btn ws-tab" data-wstab="pagenumbers"><i class="fa-solid fa-list-ol"></i><span>Numbers</span></button>
+      </nav>
+    </aside>
+
+    <section class="panel-area">
+      <div id="wsEmptyState" class="ws-empty-state">
+        <i class="fa-solid fa-file-arrow-up"></i>
+        <p>Open a PDF to get started.</p>
+        <p class="hint">Everything you do here shares one Undo/Redo history and autosaves as you go.</p>
+      </div>
+
+      <div id="wsWorkspaceMain" class="hidden">
+        <div id="wspanel-watermark" class="panel ws-panel active">
+          <h2 class="panel-title"><i class="fa-solid fa-stamp"></i> Watermark</h2>
+          <p class="panel-desc">Applies to every page. Text only in this beta — image watermarks are still on the classic Watermark tool.</p>
+          <div class="form-group"><label>Text</label><input type="text" id="wsWmText" class="input" value="CONFIDENTIAL"/></div>
+          <div class="form-row">
+            <div class="form-group"><label>Size</label><input type="number" id="wsWmSize" value="60" min="10" max="300" class="input"/></div>
+            <div class="form-group"><label>Color</label><input type="color" id="wsWmColor" value="#000000" class="input color-input"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Opacity: <span id="wsWmOpacityVal">30%</span></label><input type="range" id="wsWmOpacity" min="5" max="100" value="30" class="range-input full"/></div>
+            <div class="form-group"><label>Angle (°)</label><input type="number" id="wsWmAngle" value="-45" min="-180" max="180" class="input"/></div>
+          </div>
+          <div class="form-group"><label>Position</label>
+            <select id="wsWmPosition" class="input">
+              <option value="center">Center</option>
+              <option value="top-left">Top left</option>
+              <option value="top-right">Top right</option>
+              <option value="bottom-left">Bottom left</option>
+              <option value="bottom-right">Bottom right</option>
+            </select>
+          </div>
+          <button id="wsApplyWatermarkBtn" class="btn-action"><i class="fa-solid fa-stamp"></i> Apply to All Pages</button>
+        </div>
+
+        <div id="wspanel-pagenumbers" class="panel ws-panel">
+          <h2 class="panel-title"><i class="fa-solid fa-list-ol"></i> Page Numbers</h2>
+          <div class="form-row">
+            <div class="form-group"><label>Position</label>
+              <select id="wsPnPosition" class="input">
+                <option value="bottom-center">Bottom Centre</option>
+                <option value="bottom-right">Bottom Right</option>
+                <option value="bottom-left">Bottom Left</option>
+                <option value="top-center">Top Centre</option>
+                <option value="top-right">Top Right</option>
+                <option value="top-left">Top Left</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Start Number</label><input type="number" id="wsPnStart" value="1" min="0" class="input"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Font Size</label><input type="number" id="wsPnSize" value="14" class="input"/></div>
+            <div class="form-group"><label>Color</label><input type="color" id="wsPnColor" value="#333333" class="input color-input"/></div>
+          </div>
+          <div class="form-group"><label>Format</label>
+            <select id="wsPnFormat" class="input">
+              <option value="n">1 · 2 · 3</option>
+              <option value="of">1 of 12 · 2 of 12</option>
+              <option value="dash">— 1 — · — 2 —</option>
+              <option value="page">Page 1 · Page 2</option>
+            </select>
+          </div>
+          <button id="wsApplyPageNumBtn" class="btn-action"><i class="fa-solid fa-list-ol"></i> Apply to All Pages</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview-area">
+      <div class="preview-header">
+        <span class="preview-label">Preview</span>
+        <div class="preview-nav">
+          <button id="wsPrevPage" class="icon-btn" disabled><i class="fa-solid fa-chevron-left"></i></button>
+          <span id="wsPageIndicator">— / —</span>
+          <button id="wsNextPage" class="icon-btn" disabled><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+      </div>
+      <div class="preview-canvas-wrap">
+        <div id="wsPreviewPlaceholder" class="preview-placeholder">
+          <i class="fa-solid fa-file-pdf"></i>
+          <p>Open a PDF to preview it here</p>
+        </div>
+        <canvas id="wsPreviewCanvas" class="hidden"></canvas>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- EDITOR SCREEN (existing 12 tools, unchanged)     -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="editorScreen" class="editor-screen hidden">
 <main class="app-layout">
@@ -904,6 +1026,6 @@
 </main>
 </div><!-- /editorScreen -->
 
-<script src="script.js?v=8.0"></script>
+<script src="script.js?v=8.1"></script>
 </body>
 </html>
